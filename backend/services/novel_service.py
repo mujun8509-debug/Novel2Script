@@ -40,36 +40,55 @@ def split_chapters(text: str) -> List[Dict[str, Any]]:
     current_chapter = None
     current_content = []
 
-    chapter_pattern = re.compile("|".join(CHAPTER_PATTERNS))
+    # 更强大的章节识别模式
+    chapter_patterns = [
+        r"^第[一二三四五六七八九十百千万0-9零]+章.*",
+        r"^第[一二三四五六七八九十百千万0-9零]+回.*",
+        r"^Chapter\s+\d+.*",
+        r"^CHAPTER\s+\d+.*",
+        r"^\d+\.\s+.+",
+        r"^\d+、\s*.+",
+        r"^\s*\d+\s*$",
+    ]
+    chapter_pattern = re.compile("|".join(chapter_patterns))
 
-    for i, line in enumerate(lines[:100]):
-        if chapter_pattern.match(line.strip()):
-            print(f"[Split Chapters] 找到章节标题: '{line.strip()}' 在第 {i+1} 行")
+    # 先扫描整个文本，找出所有可能的章节标题
+    chapter_positions = []
+    for i, line in enumerate(lines):
+        stripped = line.strip()
+        if chapter_pattern.match(stripped):
+            chapter_positions.append(i)
+            print(f"[Split Chapters] 找到章节标题: '{stripped}' 在第 {i+1} 行")
 
-    for line in lines:
-        if chapter_pattern.match(line.strip()):
-            if current_chapter:
-                content = "\n".join(current_content).strip()
-                if content:
-                    chapters.append({
-                        "chapter_id": f"chapter_{len(chapters) + 1:03d}",
-                        "title": current_chapter,
-                        "content": content,
-                        "word_count": len(content)
-                    })
-            current_chapter = line.strip()
-            current_content = []
+    # 如果没有找到章节标题，尝试寻找空行分隔的块
+    if not chapter_positions:
+        print(f"[Split Chapters] 没有找到明确的章节标题，尝试按空行分割...")
+        # 寻找连续的空行
+        block_starts = [0]
+        for i in range(1, len(lines)):
+            if lines[i].strip() == "" and lines[i-1].strip() != "":
+                block_starts.append(i + 1)
+        
+        # 按段落块分割，每 3-4 个段落块为一章
+        chunk_size = max(1, len(block_starts) // 3)
+        chapter_positions = [block_starts[i] for i in range(0, len(block_starts), chunk_size)][:3]
+
+    # 根据找到的位置分割章节
+    for i in range(len(chapter_positions)):
+        start = chapter_positions[i]
+        if i < len(chapter_positions) - 1:
+            end = chapter_positions[i + 1]
         else:
-            if current_chapter is not None:
-                current_content.append(line)
-
-    # 处理最后一章
-    if current_chapter:
-        content = "\n".join(current_content).strip()
+            end = len(lines)
+        
+        title = lines[start].strip()
+        content_lines = lines[start + 1:end]
+        content = "\n".join(content_lines).strip()
+        
         if content:
             chapters.append({
-                "chapter_id": f"chapter_{len(chapters) + 1:03d}",
-                "title": current_chapter,
+                "chapter_id": f"chapter_{i + 1:03d}",
+                "title": title if title else f"第 {i + 1} 章",
                 "content": content,
                 "word_count": len(content)
             })
