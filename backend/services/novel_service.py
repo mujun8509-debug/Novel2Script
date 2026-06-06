@@ -17,6 +17,8 @@ CHAPTER_PATTERNS = [
     r"Chapter\s+\d+[^\n]*",
     r"CHAPTER\s+\d+[^\n]*",
     r"^\d+\.\s+.+",  # 1. 章节名
+    r"^\d+、\s*.+",  # 1、章节名
+    r"^\s*\d+\s*$",  # 单独的数字行
 ]
 
 
@@ -30,12 +32,19 @@ def normalize_text(text: str) -> str:
 
 def split_chapters(text: str) -> List[Dict[str, Any]]:
     """识别小说章节"""
+    print(f"[Split Chapters] 开始识别章节...")
+    print(f"[Split Chapters] 输入文本长度: {len(text)}")
+    
     lines = text.split("\n")
     chapters = []
     current_chapter = None
     current_content = []
 
     chapter_pattern = re.compile("|".join(CHAPTER_PATTERNS))
+
+    for i, line in enumerate(lines[:100]):
+        if chapter_pattern.match(line.strip()):
+            print(f"[Split Chapters] 找到章节标题: '{line.strip()}' 在第 {i+1} 行")
 
     for line in lines:
         if chapter_pattern.match(line.strip()):
@@ -64,6 +73,10 @@ def split_chapters(text: str) -> List[Dict[str, Any]]:
                 "content": content,
                 "word_count": len(content)
             })
+
+    print(f"[Split Chapters] 识别到 {len(chapters)} 章")
+    for i, ch in enumerate(chapters):
+        print(f"[Split Chapters] 第 {i+1} 章: {ch['title']}, 内容长度: {len(ch['content'])}")
 
     return chapters
 
@@ -301,23 +314,78 @@ class NovelService:
         project["status"] = "analyzing"
         novel_text = project["novel_text"]
 
+        print(f"[NovelService] 开始分析项目: {project['name']}")
+
         # 识别章节
         chapters = split_chapters(novel_text)
         project["chapters"] = chapters
 
         if len(chapters) < 3:
-            raise ValueError(f"检测到章节数不足 3 章，请上传至少 3 个章节的小说文本。当前识别到 {len(chapters)} 章。")
+            print(f"[NovelService] 章节数不足: {len(chapters)}")
+            # 如果没有识别到章节，尝试手动分块
+            print(f"[NovelService] 尝试手动分割文本...")
+            lines = novel_text.split("\n")
+            # 按大约 500 字分块
+            block_size = 500
+            current_block = []
+            current_word_count = 0
+            manual_chapters = []
+            
+            for line in lines:
+                current_block.append(line)
+                current_word_count += len(line)
+                if current_word_count >= block_size:
+                    manual_chapters.append({
+                        "chapter_id": f"chapter_{len(manual_chapters) + 1:03d}",
+                        "title": f"第 {len(manual_chapters) + 1} 章",
+                        "content": "\n".join(current_block),
+                        "word_count": len("\n".join(current_block))
+                    })
+                    current_block = []
+                    current_word_count = 0
+            
+            # 处理最后一块
+            if current_block:
+                manual_chapters.append({
+                    "chapter_id": f"chapter_{len(manual_chapters) + 1:03d}",
+                    "title": f"第 {len(manual_chapters) + 1} 章",
+                    "content": "\n".join(current_block),
+                    "word_count": len("\n".join(current_block))
+                })
+            
+            if len(manual_chapters) >= 3:
+                chapters = manual_chapters
+                project["chapters"] = chapters
+                print(f"[NovelService] 手动分割成功: {len(chapters)} 章")
+            else:
+                raise ValueError(f"检测到章节数不足 3 章，请上传至少 3 个章节的小说文本。当前识别到 {len(chapters)} 章。")
 
         # 提取全局信息
-        system_prompt = "你是一个专业的影视剧本改编助手，擅长从小说中提取剧本设定。"
-        prompt = extract_story_bible_prompt(chapters)
-
-        response = await self.llm_provider.generate(prompt, system_prompt)
-        story_bible = parse_yaml_response(response)
-
-        if story_bible and "story_bible" in story_bible:
-            project["story_bible"] = story_bible["story_bible"]
-        else:
+        try:
+            print(f"[NovelService] 开始提取全局信息...")
+            system_prompt = "你是一个专业的影视剧本改编助手，擅长从小说中提取剧本设定。"
+            prompt = extract_story_bible_prompt(chapters)
+            response = await self.llm_provider.generate(prompt, system_prompt)
+            story_bible = parse_yaml_response(response)
+            print(f"[NovelService] LLM 响应: {response[:100]}...")
+            
+            if story_bible and "story_bible" in story_bible:
+                project["story_bible"] = story_bible["story_bible"]
+                print(f"[NovelService] 全局信息提取成功")
+            else:
+                # 使用默认结构
+                print(f"[NovelService] 使用默认全局信息结构")
+                project["story_bible"] = {
+                    "title": project["name"],
+                    "genre": "悬疑",
+                    "theme": "寻找真相",
+                    "world_setting": "现代都市",
+                    "main_conflict": "待补充",
+                    "characters": [],
+                    "locations": []
+                }
+        except Exception as e:
+            print(f"[NovelService] 全局信息提取失败: {e}")
             # 使用默认结构
             project["story_bible"] = {
                 "title": project["name"],

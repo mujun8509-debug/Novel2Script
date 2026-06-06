@@ -20,6 +20,20 @@ class LLMProvider:
         self.base_url = base_url or os.getenv("OPENAI_API_BASE", "https://api.openai.com/v1")
         self.model = model
 
+        # 从环境变量读取 .env 文件
+        env_file = os.path.join(os.path.dirname(os.path.dirname(__file__)), ".env")
+        if os.path.exists(env_file):
+            with open(env_file, encoding="utf-8") as f:
+                for line in f:
+                    line = line.strip()
+                    if line and not line.startswith("#") and "=" in line:
+                        key, value = line.split("=", 1)
+                        os.environ[key.strip()] = value.strip()
+            self.api_key = os.getenv("OPENAI_API_KEY", self.api_key)
+            self.base_url = os.getenv("OPENAI_API_BASE", self.base_url)
+            if os.getenv("LLM_MODEL"):
+                self.model = os.getenv("LLM_MODEL", self.model)
+
         if provider_type == "qwen":
             self.base_url = base_url or "https://dashscope.aliyuncs.com/compatible-mode/v1"
             self.model = model or "qwen-max"
@@ -33,8 +47,15 @@ class LLMProvider:
             self.base_url = base_url or "http://localhost:8000/v1"
             self.model = model or "meta-llama/Llama-2-7b-chat-hf"
 
+        print(f"[LLM Provider] 初始化 - 类型: {self.provider_type}")
+        print(f"[LLM Provider] Base URL: {self.base_url}")
+        print(f"[LLM Provider] Model: {self.model}")
+        print(f"[LLM Provider] API Key: {self.api_key[:10]}...")
+
     async def generate(self, prompt: str, system: Optional[str] = None) -> str:
         """统一的生成接口"""
+        print(f"[LLM Provider] 开始生成请求...")
+
         headers = {
             "Authorization": f"Bearer {self.api_key}",
             "Content-Type": "application/json"
@@ -52,15 +73,27 @@ class LLMProvider:
             "max_tokens": 4000
         }
 
-        async with httpx.AsyncClient(timeout=120.0) as client:
-            response = await client.post(
-                f"{self.base_url}/chat/completions",
-                headers=headers,
-                json=payload
-            )
-            response.raise_for_status()
-            data = response.json()
-            return data["choices"][0]["message"]["content"]
+        try:
+            async with httpx.AsyncClient(timeout=120.0) as client:
+                print(f"[LLM Provider] 发送请求到: {self.base_url}/chat/completions")
+                response = await client.post(
+                    f"{self.base_url}/chat/completions",
+                    headers=headers,
+                    json=payload
+                )
+                print(f"[LLM Provider] 响应状态码: {response.status_code}")
+                response.raise_for_status()
+                data = response.json()
+                result = data["choices"][0]["message"]["content"]
+                print(f"[LLM Provider] 生成成功，长度: {len(result)}")
+                return result
+        except httpx.HTTPStatusError as e:
+            print(f"[LLM Provider] HTTP 错误: {e.response.status_code}")
+            print(f"[LLM Provider] 响应内容: {e.response.text}")
+            raise Exception(f"API 请求失败: {e.response.status_code} - {e.response.text}")
+        except Exception as e:
+            print(f"[LLM Provider] 错误: {e}")
+            raise
 
     async def generate_stream(self, prompt: str, system: Optional[str] = None):
         """流式生成接口"""
