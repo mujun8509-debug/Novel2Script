@@ -135,12 +135,34 @@ class LLMProvider:
                                 yield delta["content"]
 
 
+def load_env_file():
+    """加载 .env 文件到环境变量"""
+    env_file = os.path.join(os.path.dirname(os.path.dirname(__file__)), ".env")
+    if os.path.exists(env_file):
+        print(f"[LLM Provider] 加载 .env 文件: {env_file}")
+        with open(env_file, encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if line and not line.startswith("#") and "=" in line:
+                    key, value = line.split("=", 1)
+                    os.environ[key.strip()] = value.strip()
+
+
 def create_llm_provider() -> LLMProvider:
     """从环境变量创建 LLM Provider"""
+    # 先加载 .env 文件
+    load_env_file()
+    
     provider_type = os.getenv("LLM_PROVIDER", "openai")
     api_key = os.getenv("OPENAI_API_KEY", "")
     base_url = os.getenv("OPENAI_API_BASE", "")
     model = os.getenv("LLM_MODEL", "")
+
+    print(f"[LLM Provider] create_llm_provider:")
+    print(f"  - provider_type: {provider_type}")
+    print(f"  - api_key: {api_key[:10]}...")
+    print(f"  - base_url: {base_url}")
+    print(f"  - model: {model}")
 
     return LLMProvider(
         provider_type=provider_type,

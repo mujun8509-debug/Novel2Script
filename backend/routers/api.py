@@ -4,9 +4,17 @@ FastAPI 路由定义
 import os
 import json
 import yaml
+import logging
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
 from datetime import datetime
+
+# 设置日志
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+)
+logger = logging.getLogger(__name__)
 
 from models import (
     ProjectCreate, ProjectResponse, AnalyzeResponse,
@@ -21,8 +29,11 @@ router = APIRouter(prefix="/api")
 projects = {}
 
 # 创建 LLM Provider 和 Novel Service
+logger.info("正在创建 LLM Provider...")
 llm_provider = create_llm_provider()
+logger.info("LLM Provider 创建成功")
 novel_service = NovelService(llm_provider)
+logger.info("NovelService 创建成功")
 
 
 @router.post("/projects", response_model=dict)
@@ -54,28 +65,49 @@ async def get_project(project_id: str):
     }
 
 
+@router.get("/projects/{project_id}/analysis", response_model=dict)
+async def get_analysis(project_id: str):
+    """获取项目分析结果（章节列表和story_bible）"""
+    if project_id not in projects:
+        raise HTTPException(status_code=404, detail="项目不存在")
+    project = projects[project_id]
+    return {
+        "chapters": project.get("chapters", []),
+        "story_bible": project.get("story_bible"),
+        "chapters_count": len(project.get("chapters", []))
+    }
+
+
 @router.post("/projects/{project_id}/analyze", response_model=dict)
 async def analyze_project(project_id: str):
     """分析小说：识别章节，提取全局信息"""
+    logger.info(f"开始分析项目: {project_id}")
+    
     if project_id not in projects:
+        logger.error(f"项目不存在: {project_id}")
         raise HTTPException(status_code=404, detail="项目不存在")
 
     project = projects[project_id]
 
     try:
+        logger.info(f"调用 novel_service.analyze")
         project = await novel_service.analyze(project)
         projects[project_id] = project
+        logger.info(f"分析完成，章节数: {len(project.get('chapters', []))}")
         return {
             "status": "analyzed",
             "chapters_count": len(project.get("chapters", [])),
+            "chapters": project.get("chapters", []),
             "story_bible": project.get("story_bible")
         }
     except ValueError as e:
+        logger.error(f"验证错误: {e}")
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
+        logger.error(f"分析失败: {e}", exc_info=True)
         project["status"] = "error"
         projects[project_id] = project
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=f"分析失败: {str(e)}")
 
 
 @router.post("/projects/{project_id}/convert", response_model=dict)

@@ -83,9 +83,19 @@ export const apiService = {
     return response.data
   },
 
-  // 获取项目信息
+  // 获取项目详情
   async getProject(id: string): Promise<ProjectInfo> {
     const response = await api.get(`/projects/${id}`)
+    return response.data
+  },
+
+  // 获取项目分析结果
+  async getAnalysis(id: string): Promise<{
+    chapters: ChapterInfo[]
+    story_bible: StoryBible
+    chapters_count: number
+  }> {
+    const response = await api.get(`/projects/${id}/analysis`)
     return response.data
   },
 
@@ -93,6 +103,7 @@ export const apiService = {
   async analyzeProject(id: string): Promise<{
     status: string
     chapters_count: number
+    chapters: ChapterInfo[]
     story_bible: StoryBible
   }> {
     const response = await api.post(`/projects/${id}/analyze`)

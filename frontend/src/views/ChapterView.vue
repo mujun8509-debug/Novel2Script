@@ -20,6 +20,7 @@ const handleAnalyze = async () => {
   currentStep.value = '正在分析小说...'
   try {
     const result = await apiService.analyzeProject(projectId)
+    chapters.value = result.chapters || []
     storyBible.value = result.story_bible
     currentStep.value = '提取人物设定...'
     await fetchProjectDetails()
@@ -46,20 +47,19 @@ const handleConvert = () => {
 
 onMounted(async () => {
   await fetchProjectDetails()
-  if (projectInfo.value?.has_story_bible) {
-    try {
-      const result = await apiService.getProject(projectId)
-      const fullProject = await apiService.getProject(projectId)
-      // 已经是分析过的状态
-      storyBible.value = null // 需要重新获取
-    } catch (e) {
-      // ignore
-    }
-  }
   loading.value = false
 
-  // 自动开始分析
-  if (!projectInfo.value?.has_story_bible) {
+  if (projectInfo.value?.has_story_bible) {
+    // 已经分析过，获取完整的章节和story_bible数据
+    try {
+      const result = await apiService.getAnalysis(projectId)
+      chapters.value = result.chapters || []
+      storyBible.value = result.story_bible
+    } catch (e) {
+      console.error('获取分析结果失败', e)
+    }
+  } else {
+    // 自动开始分析
     setTimeout(() => {
       handleAnalyze()
     }, 500)

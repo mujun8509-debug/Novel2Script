@@ -10,90 +10,180 @@ from typing import List, Dict, Any, Optional
 from datetime import datetime
 
 
-# 章节识别正则表达式
-CHAPTER_PATTERNS = [
-    r"第[一二三四五六七八九十百千万零0-9]+章[^\n]*",
-    r"第[一二三四五六七八九十百千万零0-9]+回[^\n]*",
-    r"Chapter\s+\d+[^\n]*",
-    r"CHAPTER\s+\d+[^\n]*",
-    r"^\d+\.\s+.+",  # 1. 章节名
-    r"^\d+、\s*.+",  # 1、章节名
-    r"^\s*\d+\s*$",  # 单独的数字行
-]
-
-
 def normalize_text(text: str) -> str:
-    """文本规范化"""
-    text = text.replace("\r\n", "\n")
-    text = text.replace("\r", "\n")
-    text = text.strip()
-    return text
+    """规范化文本，预处理"""
+    text = text.replace("\r\n", "\n").replace("\r", "\n")
+    text = text.replace("\ufeff", "")
+    
+    # 全角空格转半角
+    text = text.replace("\u3000", " ")
+    
+    # 如果章节标题前没有换行，强制补换行
+    text = re.sub(
+        r"(?<!\n)(第\s*[一二三四五六七八九十百千万零〇两0-9]+\s*[章节回卷集部篇])",
+        r"\n\1",
+        text
+    )
+    
+    return text.strip()
 
 
 def split_chapters(text: str) -> List[Dict[str, Any]]:
-    """识别小说章节"""
+    """识别小说章节 - 支持有无标题两种情况"""
     print(f"[Split Chapters] 开始识别章节...")
     print(f"[Split Chapters] 输入文本长度: {len(text)}")
     
+    # 先规范化文本
+    text = normalize_text(text)
+    
     lines = text.split("\n")
     chapters = []
-    current_chapter = None
-    current_content = []
-
-    # 更强大的章节识别模式
+    
+    # 清理空行但保留段落分隔
+    cleaned_lines = []
+    for line in lines:
+        stripped = line.strip()
+        if stripped or (cleaned_lines and cleaned_lines[-1] != ""):
+            cleaned_lines.append(stripped)
+    
+    print(f"[Split Chapters] 清理后行数: {len(cleaned_lines)}")
+    
+    # 增强版章节标题模式
     chapter_patterns = [
-        r"^第[一二三四五六七八九十百千万0-9零]+章.*",
-        r"^第[一二三四五六七八九十百千万0-9零]+回.*",
-        r"^Chapter\s+\d+.*",
-        r"^CHAPTER\s+\d+.*",
-        r"^\d+\.\s+.+",
-        r"^\d+、\s*.+",
-        r"^\s*\d+\s*$",
+        r"^\s*第\s*[一二三四五六七八九十百千万零〇两0-9]+\s*[章节回卷集部篇]\s*[:：、.\-—]?\s*.*$",
+        r"^\s*[一二三四五六七八九十百千万零〇两0-9]+\s*[、.．]\s*.+$",
+        r"^\s*[Cc][Hh][Aa][Pp][Tt][Ee][Rr]\s*\d+\s*.*$",
+        r"^\s*【\s*第?\s*[一二三四五六七八九十百千万零〇两0-9]+\s*[章节回卷集部篇]?\s*】\s*.*$",
+        r"^\s*序章\s*$",
+        r"^\s*楔子\s*$",
+        r"^\s*尾声\s*$",
+        r"^\s*番外\s*[一二三四五六七八九十0-9]*\s*.*$",
     ]
     chapter_pattern = re.compile("|".join(chapter_patterns))
 
-    # 先扫描整个文本，找出所有可能的章节标题
+    # 扫描章节标题位置
     chapter_positions = []
-    for i, line in enumerate(lines):
-        stripped = line.strip()
-        if chapter_pattern.match(stripped):
+    for i, line in enumerate(cleaned_lines):
+        if chapter_pattern.match(line):
             chapter_positions.append(i)
-            print(f"[Split Chapters] 找到章节标题: '{stripped}' 在第 {i+1} 行")
+            print(f"[Split Chapters] 找到章节标题: '{line[:50]}...' 在第 {i+1} 行")
 
-    # 如果没有找到章节标题，尝试寻找空行分隔的块
-    if not chapter_positions:
-        print(f"[Split Chapters] 没有找到明确的章节标题，尝试按空行分割...")
-        # 寻找连续的空行
-        block_starts = [0]
-        for i in range(1, len(lines)):
-            if lines[i].strip() == "" and lines[i-1].strip() != "":
-                block_starts.append(i + 1)
+    # 如果找到了章节标题
+    if chapter_positions:
+        # 确保第一个标题从文本开始
+        if chapter_positions[0] != 0:
+            chapter_positions.insert(0, 0)
         
-        # 按段落块分割，每 3-4 个段落块为一章
-        chunk_size = max(1, len(block_starts) // 3)
-        chapter_positions = [block_starts[i] for i in range(0, len(block_starts), chunk_size)][:3]
+        # 分割章节
+        for i in range(len(chapter_positions)):
+            start = chapter_positions[i]
+            if i < len(chapter_positions) - 1:
+                end = chapter_positions[i + 1]
+            else:
+                end = len(cleaned_lines)
+            
+            # 获取标题
+            if start < len(cleaned_lines) and chapter_pattern.match(cleaned_lines[start]):
+                title = cleaned_lines[start]
+                content_start = start + 1
+            else:
+                title = f"第 {i + 1} 章"
+                content_start = start
+            
+            # 获取内容
+            content_lines = cleaned_lines[content_start:end]
+            content = "\n".join([l for l in content_lines if l]).strip()
+            
+            if content:
+                chapters.append({
+                    "chapter_id": f"chapter_{i + 1:03d}",
+                    "title": title,
+                    "content": content,
+                    "word_count": len(content)
+                })
+    else:
+        # 没有找到章节标题，按内容长度平均分割
+        print(f"[Split Chapters] 未找到章节标题，按内容平均分割...")
+        
+        # 计算总字数
+        total_content = "\n".join([l for l in cleaned_lines if l])
+        total_chars = len(total_content)
+        print(f"[Split Chapters] 总字数: {total_chars}")
+        
+        # 至少分成 3 章
+        num_chapters = max(3, min(10, total_chars // 1000))
+        chars_per_chapter = total_chars // num_chapters
+        
+        print(f"[Split Chapters] 计划分成 {num_chapters} 章，每章约 {chars_per_chapter} 字")
+        
+        current_char_count = 0
+        current_content = []
+        chapter_num = 1
+        
+        for line in cleaned_lines:
+            if not line:
+                current_content.append(line)
+                continue
+            
+            line_char_count = len(line)
+            
+            # 如果加上这行超过了每章的字数限制，且已有内容，就分割
+            if current_char_count + line_char_count > chars_per_chapter and current_content:
+                content = "\n".join([l for l in current_content if l]).strip()
+                if content:
+                    chapters.append({
+                        "chapter_id": f"chapter_{chapter_num:03d}",
+                        "title": f"第 {chapter_num} 章",
+                        "content": content,
+                        "word_count": len(content)
+                    })
+                    chapter_num += 1
+                    current_content = []
+                    current_char_count = 0
+            
+            current_content.append(line)
+            current_char_count += line_char_count
+        
+        # 处理最后一章
+        if current_content:
+            content = "\n".join([l for l in current_content if l]).strip()
+            if content:
+                chapters.append({
+                    "chapter_id": f"chapter_{chapter_num:03d}",
+                    "title": f"第 {chapter_num} 章",
+                    "content": content,
+                    "word_count": len(content)
+                })
+    
+    # 如果还是没有章节，强制生成 3 章
+    if len(chapters) < 3:
+        print(f"[Split Chapters] 章节数不足，强制生成 3 章...")
+        total_content = "\n".join([l for l in cleaned_lines if l]).strip()
+        if total_content:
+            # 简单地按字符数平均分割
+            third = len(total_content) // 3
+            chapters = [
+                {
+                    "chapter_id": "chapter_001",
+                    "title": "第 1 章",
+                    "content": total_content[:third],
+                    "word_count": len(total_content[:third])
+                },
+                {
+                    "chapter_id": "chapter_002",
+                    "title": "第 2 章",
+                    "content": total_content[third:2*third],
+                    "word_count": len(total_content[third:2*third])
+                },
+                {
+                    "chapter_id": "chapter_003",
+                    "title": "第 3 章",
+                    "content": total_content[2*third:],
+                    "word_count": len(total_content[2*third:])
+                }
+            ]
 
-    # 根据找到的位置分割章节
-    for i in range(len(chapter_positions)):
-        start = chapter_positions[i]
-        if i < len(chapter_positions) - 1:
-            end = chapter_positions[i + 1]
-        else:
-            end = len(lines)
-        
-        title = lines[start].strip()
-        content_lines = lines[start + 1:end]
-        content = "\n".join(content_lines).strip()
-        
-        if content:
-            chapters.append({
-                "chapter_id": f"chapter_{i + 1:03d}",
-                "title": title if title else f"第 {i + 1} 章",
-                "content": content,
-                "word_count": len(content)
-            })
-
-    print(f"[Split Chapters] 识别到 {len(chapters)} 章")
+    print(f"[Split Chapters] 最终识别到 {len(chapters)} 章")
     for i, ch in enumerate(chapters):
         print(f"[Split Chapters] 第 {i+1} 章: {ch['title']}, 内容长度: {len(ch['content'])}")
 
