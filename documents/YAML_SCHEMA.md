@@ -136,6 +136,17 @@ beats:
 | narration | 旁白 | 否 |
 | transition | 转场 | 否 |
 
+### type 类型约束
+
+beats.type 只能取以下值：
+
+| type 值 | 必填字段 | 可选字段 |
+|--------|----------|----------|
+| dialogue | type, speaker, content | - |
+| action | type, content | - |
+| narration | type, content | - |
+| transition | type, content | - |
+
 ### type 设计原因
 
 - **dialogue**：剧本核心，用于角色对白，必须标注说话者
@@ -229,3 +240,22 @@ chapters:
           - type: "narration"
             content: "林澈没有立刻回答，他的目光停在柜台后的黑色信封上。"
 ```
+
+## 9. 完整示例
+
+完整的三章 YAML 示例文件可见：`../examples/sample_output.yaml`
+
+该示例展示了：
+- 如何组织 3 个以上章节
+- story_bible 的完整结构
+- scenes 和 beats 的嵌套关系
+- dialogue、action、narration、transition 的使用
+
+## 10. 与题目要求对应
+
+| 题目要求 | Schema 实现 |
+|----------|------------|
+| 3 个章节以上小说 | chapters 数组至少包含 3 个元素 |
+| 结构化剧本 | 分层结构：script → chapters → scenes → beats |
+| YAML 格式 | 输出纯 YAML，可直接导出和编辑 |
+| 可编辑 | YAML 文件可人工修改，无锁定 |
