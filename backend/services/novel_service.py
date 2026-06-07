@@ -28,6 +28,205 @@ def normalize_text(text: str) -> str:
     return text.strip()
 
 
+def clamp(value: int, min_value: int, max_value: int) -> int:
+    """限制数值范围。"""
+    return max(min_value, min(max_value, value))
+
+
+def score_narrative_boundary(prev_para: str, next_para: str) -> int:
+    """给无标题文本中的段落边界打分，分数越高越适合作为章节分界。"""
+    score = 0
+    prev_tail = prev_para[-80:]
+    next_head = next_para[:120]
+
+    strong_start_patterns = [
+        r"^(第二天|次日|翌日|几天后|数日后|多年后|十年后|当天晚上|那天晚上|接下来的几天)",
+        r"^(清晨|黎明|上午|中午|午后|傍晚|黄昏|夜里|深夜|雨停后)",
+        r"^(与此同时|另一边|同一时间|后来|之后|随后)",
+    ]
+    location_shift_patterns = [
+        r"(来到|走进|回到|离开|赶到|抵达).{0,12}(旧书店|公寓|档案馆|工厂|学校|医院|办公室|街|门口|房间|大厅|车站)",
+        r"^(门外|店里|房间里|街上|雨幕中|档案馆|废弃工厂|南城旧街)",
+    ]
+    event_shift_patterns = [
+        r"^(就在这时|这时|突然|忽然|门铃再次响起|电话响起|外面传来|门外站着)",
+        r"(陷入了沉默|必须|决定|计划|真相|秘密|失踪|被杀|跟踪)",
+    ]
+
+    if any(re.search(pattern, next_head) for pattern in strong_start_patterns):
+        score += 8
+    if any(re.search(pattern, next_head) for pattern in location_shift_patterns):
+        score += 5
+    if any(re.search(pattern, next_head) for pattern in event_shift_patterns):
+        score += 3
+    if re.search(r"[？?!！。]$", prev_tail.strip()):
+        score += 1
+    if "。" in prev_tail and re.match(r'^[“"]', next_head):
+        score += 1
+    if re.search(r"(会是谁|怎么办|为什么|什么版本|必须去|今晚就去)[？?。！””\"]*$", prev_tail.strip()):
+        score += 2
+
+    return score
+
+
+def estimate_auto_chapter_count(total_chars: int, paragraphs: List[str]) -> int:
+    """根据文本长度和剧情转场密度估算无标题文本的章节数。"""
+    length_based = round(total_chars / 1800)
+    transition_count = 0
+    for index in range(len(paragraphs) - 1):
+        if score_narrative_boundary(paragraphs[index], paragraphs[index + 1]) >= 6:
+            transition_count += 1
+
+    # 短文本仍满足至少 3 章；长文本会随篇幅和强转场自然增加章节。
+    count = max(3, length_based, transition_count + 1)
+    max_by_length = max(3, (total_chars + 899) // 900)
+    return clamp(count, 3, min(10, max_by_length))
+
+
+def infer_auto_chapter_title(chapter_num: int, content: str) -> str:
+    """为自动划分章节生成可读标题。"""
+    first_line = next((line.strip() for line in content.split("\n") if line.strip()), "")
+    title_seed = re.sub(r"^[“\"'「『]+|[。！？!?，,；;：“”\"'」』]+$", "", first_line)
+    title_seed = title_seed[:18] or "剧情推进"
+    return f"第 {chapter_num} 章（自动分章：{title_seed}）"
+
+
+def build_auto_chapter(paragraphs: List[str], start: int, end: int, chapter_num: int) -> Dict[str, Any]:
+    """按段落区间构建自动章节。end 为闭区间。"""
+    content = "\n".join(paragraphs[start:end + 1]).strip()
+    return {
+        "chapter_id": f"chapter_{chapter_num:03d}",
+        "title": infer_auto_chapter_title(chapter_num, content),
+        "content": content,
+        "word_count": len(content)
+    }
+
+
+def split_untitled_text_by_content(cleaned_lines: List[str]) -> List[Dict[str, Any]]:
+    """无章节标题时，优先根据剧情转场和段落节奏划分章节。"""
+    paragraphs = [line.strip() for line in cleaned_lines if line.strip()]
+    if not paragraphs:
+        return []
+    if len(paragraphs) < 3:
+        return [build_auto_chapter(paragraphs, 0, len(paragraphs) - 1, 1)]
+
+    total_chars = sum(len(paragraph) for paragraph in paragraphs)
+    target_count = estimate_auto_chapter_count(total_chars, paragraphs)
+    target_size = max(1, total_chars // target_count)
+    min_size = max(180, int(target_size * 0.45))
+    max_size = max(min_size + 1, int(target_size * 1.75))
+
+    print(f"[Split Chapters] 未找到章节标题，启用内容感知分章...")
+    print(f"[Split Chapters] 总字数: {total_chars}")
+    print(f"[Split Chapters] 计划分成 {target_count} 章，每章目标约 {target_size} 字")
+
+    prefix_lengths = [0]
+    for paragraph in paragraphs:
+        prefix_lengths.append(prefix_lengths[-1] + len(paragraph))
+
+    chapters = []
+    start = 0
+    chapter_num = 1
+
+    while start < len(paragraphs) and chapter_num <= target_count:
+        remaining_chapters = target_count - chapter_num + 1
+        if remaining_chapters == 1:
+            chapters.append(build_auto_chapter(paragraphs, start, len(paragraphs) - 1, chapter_num))
+            break
+
+        best_boundary = None
+        best_score = None
+        fallback_boundary = None
+        fallback_distance = None
+
+        for boundary in range(start, len(paragraphs) - 1):
+            segment_len = prefix_lengths[boundary + 1] - prefix_lengths[start]
+            remaining_len = prefix_lengths[-1] - prefix_lengths[boundary + 1]
+
+            if segment_len < min_size:
+                continue
+            if remaining_len < min_size * (remaining_chapters - 1):
+                break
+
+            distance = abs(segment_len - target_size)
+            if fallback_distance is None or distance < fallback_distance:
+                fallback_boundary = boundary
+                fallback_distance = distance
+
+            boundary_score = score_narrative_boundary(paragraphs[boundary], paragraphs[boundary + 1])
+            length_penalty = distance / max(target_size, 1)
+            combined_score = boundary_score * 10 - length_penalty * 4
+
+            if best_score is None or combined_score > best_score:
+                best_boundary = boundary
+                best_score = combined_score
+
+            if segment_len >= max_size and boundary_score < 6:
+                break
+
+        boundary = best_boundary if best_boundary is not None and best_score is not None and best_score > -2 else fallback_boundary
+        if boundary is None:
+            boundary = min(len(paragraphs) - 2, start)
+
+        chapters.append(build_auto_chapter(paragraphs, start, boundary, chapter_num))
+        print(
+            f"[Split Chapters] 自动分章 {chapter_num}: 段落 {start + 1}-{boundary + 1}, "
+            f"长度 {chapters[-1]['word_count']}"
+        )
+
+        start = boundary + 1
+        chapter_num += 1
+
+    return chapters
+
+
+def ensure_minimum_chapters(chapters: List[Dict[str, Any]], cleaned_lines: List[str]) -> List[Dict[str, Any]]:
+    """确保至少 3 章；优先按段落重分，而不是切断句子。"""
+    if len(chapters) >= 3:
+        return chapters
+
+    print(f"[Split Chapters] 章节数不足，按段落补足到 3 章...")
+    paragraphs = [line.strip() for line in cleaned_lines if line.strip()]
+    if not paragraphs:
+        return chapters
+    if len(paragraphs) < 3:
+        total_content = "\n".join(paragraphs).strip()
+        if not total_content:
+            return chapters
+        third = max(1, len(total_content) // 3)
+        chunks = [total_content[:third], total_content[third:2 * third], total_content[2 * third:]]
+        return [
+            {
+                "chapter_id": f"chapter_{index + 1:03d}",
+                "title": infer_auto_chapter_title(index + 1, chunk),
+                "content": chunk,
+                "word_count": len(chunk)
+            }
+            for index, chunk in enumerate(chunks)
+        ]
+
+    total_chars = sum(len(paragraph) for paragraph in paragraphs)
+    target_size = max(1, total_chars // 3)
+    rebuilt = []
+    start = 0
+
+    for chapter_num in range(1, 4):
+        if chapter_num == 3:
+            end = len(paragraphs) - 1
+        else:
+            end = start
+            while end < len(paragraphs) - 1:
+                current_len = sum(len(paragraph) for paragraph in paragraphs[start:end + 1])
+                remaining_paragraphs = len(paragraphs) - end - 1
+                if current_len >= target_size and remaining_paragraphs >= (3 - chapter_num):
+                    break
+                end += 1
+        rebuilt.append(build_auto_chapter(paragraphs, start, end, chapter_num))
+        start = end + 1
+
+    return rebuilt
+
+
 def split_chapters(text: str) -> List[Dict[str, Any]]:
     """识别小说章节 - 支持有无标题两种情况"""
     print(f"[Split Chapters] 开始识别章节...")
@@ -102,86 +301,9 @@ def split_chapters(text: str) -> List[Dict[str, Any]]:
                     "word_count": len(content)
                 })
     else:
-        # 没有找到章节标题，按内容长度平均分割
-        print(f"[Split Chapters] 未找到章节标题，按内容平均分割...")
-        
-        # 计算总字数
-        total_content = "\n".join([l for l in cleaned_lines if l])
-        total_chars = len(total_content)
-        print(f"[Split Chapters] 总字数: {total_chars}")
-        
-        # 至少分成 3 章
-        num_chapters = max(3, min(10, total_chars // 1000))
-        chars_per_chapter = total_chars // num_chapters
-        
-        print(f"[Split Chapters] 计划分成 {num_chapters} 章，每章约 {chars_per_chapter} 字")
-        
-        current_char_count = 0
-        current_content = []
-        chapter_num = 1
-        
-        for line in cleaned_lines:
-            if not line:
-                current_content.append(line)
-                continue
-            
-            line_char_count = len(line)
-            
-            # 如果加上这行超过了每章的字数限制，且已有内容，就分割
-            if current_char_count + line_char_count > chars_per_chapter and current_content:
-                content = "\n".join([l for l in current_content if l]).strip()
-                if content:
-                    chapters.append({
-                        "chapter_id": f"chapter_{chapter_num:03d}",
-                        "title": f"第 {chapter_num} 章",
-                        "content": content,
-                        "word_count": len(content)
-                    })
-                    chapter_num += 1
-                    current_content = []
-                    current_char_count = 0
-            
-            current_content.append(line)
-            current_char_count += line_char_count
-        
-        # 处理最后一章
-        if current_content:
-            content = "\n".join([l for l in current_content if l]).strip()
-            if content:
-                chapters.append({
-                    "chapter_id": f"chapter_{chapter_num:03d}",
-                    "title": f"第 {chapter_num} 章",
-                    "content": content,
-                    "word_count": len(content)
-                })
+        chapters = split_untitled_text_by_content(cleaned_lines)
     
-    # 如果还是没有章节，强制生成 3 章
-    if len(chapters) < 3:
-        print(f"[Split Chapters] 章节数不足，强制生成 3 章...")
-        total_content = "\n".join([l for l in cleaned_lines if l]).strip()
-        if total_content:
-            # 简单地按字符数平均分割
-            third = len(total_content) // 3
-            chapters = [
-                {
-                    "chapter_id": "chapter_001",
-                    "title": "第 1 章",
-                    "content": total_content[:third],
-                    "word_count": len(total_content[:third])
-                },
-                {
-                    "chapter_id": "chapter_002",
-                    "title": "第 2 章",
-                    "content": total_content[third:2*third],
-                    "word_count": len(total_content[third:2*third])
-                },
-                {
-                    "chapter_id": "chapter_003",
-                    "title": "第 3 章",
-                    "content": total_content[2*third:],
-                    "word_count": len(total_content[2*third:])
-                }
-            ]
+    chapters = ensure_minimum_chapters(chapters, cleaned_lines)
 
     print(f"[Split Chapters] 最终识别到 {len(chapters)} 章")
     for i, ch in enumerate(chapters):
