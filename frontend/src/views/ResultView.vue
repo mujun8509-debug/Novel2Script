@@ -197,6 +197,37 @@ onMounted(async () => {
               :key="chapter.chapter_id"
               class="chapter-section"
             >
+              <!-- 本章概览卡片 -->
+              <div class="chapter-overview">
+                <div class="overview-title">本章概览</div>
+                <div class="overview-grid">
+                  <div class="overview-item">
+                    <span class="overview-label">章节</span>
+                    <span class="overview-value">{{ chapter.title }}</span>
+                  </div>
+                  <div class="overview-item">
+                    <span class="overview-label">人物</span>
+                    <span class="overview-value">
+                      {{ chapter.scenes?.flatMap((s: any) => s.characters || []).filter((c: string, i: number, arr: string[]) => arr.indexOf(c) === i).slice(0, 5).join('、') || '待提取' }}
+                    </span>
+                  </div>
+                  <div class="overview-item">
+                    <span class="overview-label">地点</span>
+                    <span class="overview-value">
+                      {{ chapter.scenes?.map((s: any) => s.location).filter((c: string, i: number, arr: string[]) => arr.indexOf(c) === i).join('、') || '待提取' }}
+                    </span>
+                  </div>
+                  <div class="overview-item">
+                    <span class="overview-label">场景数</span>
+                    <span class="overview-value">{{ chapter.scenes?.length || 0 }} 个</span>
+                  </div>
+                </div>
+                <div v-if="chapter.summary" class="overview-summary">
+                  <span class="overview-label">章节概要</span>
+                  <span class="overview-value">{{ chapter.summary }}</span>
+                </div>
+              </div>
+
               <h3 class="chapter-title">{{ chapter.title }}</h3>
 
               <div
@@ -502,6 +533,63 @@ onMounted(async () => {
   margin-bottom: 16px;
   padding-bottom: 8px;
   border-bottom: 2px solid var(--primary-color);
+}
+
+/* 本章概览卡片 */
+.chapter-overview {
+  background: linear-gradient(135deg, rgba(99, 102, 241, 0.15) 0%, rgba(139, 92, 246, 0.1) 100%);
+  border: 1px solid rgba(99, 102, 241, 0.3);
+  border-radius: 12px;
+  padding: 16px 20px;
+  margin-bottom: 20px;
+}
+
+.overview-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--primary-color);
+  margin-bottom: 12px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.overview-title::before {
+  content: '📋';
+}
+
+.overview-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.overview-item {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.overview-label {
+  font-size: 11px;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.overview-value {
+  font-size: 13px;
+  color: var(--text-primary);
+  font-weight: 500;
+}
+
+.overview-summary {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding-top: 12px;
+  border-top: 1px solid rgba(99, 102, 241, 0.2);
 }
 
 .scene-block {
