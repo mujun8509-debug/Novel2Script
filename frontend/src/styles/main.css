@@ -153,3 +153,50 @@ body {
 ::-webkit-scrollbar-thumb:hover {
   background: var(--primary-hover);
 }
+
+/* 移动端适配 */
+@media (max-width: 768px) {
+  .page-title {
+    font-size: 24px;
+  }
+  
+  .page-subtitle {
+    font-size: 14px;
+    margin-bottom: 20px;
+  }
+  
+  .card {
+    padding: 16px;
+    border-radius: 12px;
+  }
+  
+  .btn-primary {
+    width: 100%;
+    padding: 14px 24px;
+    font-size: 15px;
+  }
+  
+  .input-area {
+    min-height: 160px;
+    font-size: 14px;
+  }
+  
+  .result-content {
+    grid-template-columns: 1fr !important;
+  }
+  
+  .yaml-editor {
+    font-size: 12px;
+    min-height: 280px;
+  }
+  
+  .stats-bar {
+    flex-wrap: wrap;
+    gap: 12px;
+  }
+  
+  .stat-item {
+    flex: 1 0 40%;
+    text-align: center;
+  }
+}
