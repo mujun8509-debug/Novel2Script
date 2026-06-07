@@ -1,9 +1,75 @@
 <script setup lang="ts">
 import { ref, computed, watch } from 'vue'
 import { useRouter } from 'vue-router'
-import { UploadFilled, Document, ArrowRight, Check, Warning } from '@element-plus/icons-vue'
+import { UploadFilled, Document, ArrowRight, Check, Warning, MagicStick } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import { apiService } from '@/api'
+
+// 示例小说文本
+const SAMPLE_NOVEL = `第一章 雨夜来客
+
+窗外的大雨已经下了整整三天。南城旧街的青石板路被雨水冲刷得发亮，两旁的老式路灯在雾气中摇曳，像是随时会熄灭的幽灵。
+
+林澈推开旧书店的门，雨水顺着他的黑色外套滴落在地上。门上的铜铃发出清脆的响声，在寂静的店堂里回荡。
+
+店里弥漫着陈旧纸张特有的气息，混合着淡淡的檀香。四周的书架高耸入云，塞满了发黄的旧书。柜台后面，一盏台灯散发着昏黄的光。
+
+"你终于来了。"
+
+林澈没有立刻回答。他的目光穿过层层书架，落在柜台后面的那个身影上。多年的岁月在那张脸上留下了痕迹，但她依然是记忆中的模样——沈眠，他儿时的玩伴，也是他寻找了十年的人。
+
+"我找了你十年。"林澈的声音低沉，像是从喉咙深处挤出来的。
+
+沈眠轻轻叹了口气，将手中的书放下。"我知道你会来。只是没想到会是在今晚。"
+
+门外传来急促的脚步声。一个年轻女人出现在门口，她穿着一件米色的风衣，长发被雨水打湿，贴在脸上。
+
+"沈眠姐，我——"女人的声音在看到林澈时戛然而止，眼神里闪过一丝惊讶。
+
+第二章 黑色信封
+
+第二天清晨，南城旧街笼罩在一层薄雾中。
+
+林澈一夜未眠。他反复翻看父亲留下的那张地图，上面标注的位置在城郊的一座废弃工厂里。
+
+沈眠端着两杯热茶走过来，将其中一杯放在林澈面前。"喝点热的，暖暖身子。"
+
+"那个女人是谁？"林澈接过茶杯，却没有喝。
+
+"她叫苏雨，"沈眠坐到他对面，"是我妹妹。"
+
+林澈的目光猛地一凝。"你妹妹？你不是独生子吗？"
+
+"那是十年前的事了。"沈眠低下头，"那场火灾之后，一切都变了。"
+
+就在这时，门外传来敲门声。一个穿着制服的中年男人站在门口，他的脸上带着职业性的微笑。
+
+"林澈先生？我是陈志远，陈氏集团的律师。"
+
+第三章 旧街谜案
+
+陈志远从公文包里取出一个黑色的信封，放在桌上。
+
+"这是陈老先生让我转交给你的。"律师的声音很平静，"他说，等你看完这封信，一切都会明白。"
+
+林澈拿起信封。信封很厚，里面似乎装着不止一页纸。他用手指轻轻捏了捏，感受到了某种硬物的轮廓。
+
+"陈老先生还让我带了一句话，"陈志远站起身，"他说，对不起。"
+
+林澈看着律师离开的背影，没有说话。他将信封收进外套内侧的口袋里，然后站起身。
+
+"我要走了。"他对沈眠说。
+
+沈眠点点头，似乎早就预料到了。"小心点。如果有任何问题，立刻联系我。"
+
+林澈推开门，冷风夹着细雨扑面而来。他大步走进雨幕中，很快消失在街道的尽头。`
+
+// 载入示例小说
+const loadSampleNovel = () => {
+  novelText.value = SAMPLE_NOVEL
+  uploadedFileName.value = 'sample_novel.txt'
+  ElMessage.success('已载入示例小说，可直接点击开始解析体验完整流程')
+}
 
 const router = useRouter()
 const projectName = ref('')
@@ -208,6 +274,14 @@ const handleSubmit = async () => {
       </div>
 
       <div class="form-actions">
+        <button
+          class="btn-sample"
+          @click="loadSampleNovel"
+          :disabled="loading"
+        >
+          <el-icon><MagicStick /></el-icon>
+          载入示例小说
+        </button>
         <button
           class="btn-primary"
           :disabled="loading"
@@ -437,7 +511,29 @@ const handleSubmit = async () => {
 .form-actions {
   display: flex;
   justify-content: center;
+  gap: 16px;
   margin-top: 32px;
+  flex-wrap: wrap;
+}
+
+.btn-sample {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 14px 32px;
+  font-size: 15px;
+  background: rgba(139, 92, 246, 0.15);
+  border: 1px solid rgba(139, 92, 246, 0.3);
+  border-radius: 10px;
+  color: #a78bfa;
+  cursor: pointer;
+  transition: all 0.3s ease;
+}
+
+.btn-sample:hover {
+  background: rgba(139, 92, 246, 0.25);
+  border-color: rgba(139, 92, 246, 0.5);
+  color: #c4b5fd;
 }
 
 .btn-primary {
