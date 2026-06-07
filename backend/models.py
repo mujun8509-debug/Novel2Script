@@ -18,7 +18,7 @@ class Location(BaseModel):
     description: Optional[str] = None
 
 
-class Beat(BaseModel):
+class ScriptElement(BaseModel):
     type: Literal["dialogue", "action", "narration", "transition"]
     speaker: Optional[str] = None
     content: str
@@ -31,7 +31,7 @@ class Scene(BaseModel):
     time: str
     characters: List[str]
     summary: str
-    beats: List[Beat]
+    elements: List[ScriptElement]
 
 
 class Chapter(BaseModel):
@@ -50,10 +50,20 @@ class StoryBible(BaseModel):
     locations: List[Location]
 
 
+class Script(BaseModel):
+    title: str
+    genre: str
+    theme: str
+    world_setting: str
+    main_conflict: str
+    characters: List[Character]
+    locations: List[Location]
+    chapters: List[Chapter]
+
+
 class ScriptYaml(BaseModel):
     schema_version: str = "1.0"
-    story_bible: StoryBible
-    chapters: List[Chapter]
+    script: Script
 
 
 class ChapterInfo(BaseModel):
@@ -66,6 +76,10 @@ class ChapterInfo(BaseModel):
 class ProjectCreate(BaseModel):
     name: str
     novel_text: str
+
+
+class ConvertRequest(BaseModel):
+    chapter_ids: Optional[List[str]] = None
 
 
 class ProjectResponse(BaseModel):

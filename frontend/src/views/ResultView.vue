@@ -21,8 +21,18 @@ const stats = computed(() => validationResult.value?.stats || {})
 // 检查 YAML 是否包含必要结构
 const yamlStructureValid = computed(() => {
   try {
-    const obj = yaml.load(yamlText.value)
-    return obj && obj.script && obj.script.chapters && obj.script.chapters.length >= 3
+    const obj: any = yaml.load(yamlText.value)
+    return Boolean(
+      obj?.schema_version &&
+      obj?.script &&
+      Array.isArray(obj.script.characters) &&
+      Array.isArray(obj.script.chapters) &&
+      obj.script.chapters.length >= 3 &&
+      obj.script.chapters.every((chapter: any) =>
+        Array.isArray(chapter.scenes) &&
+        chapter.scenes.every((scene: any) => Array.isArray(scene.elements))
+      )
+    )
   } catch {
     return false
   }
@@ -34,7 +44,7 @@ const handleExport = async (format: 'yaml' | 'md') => {
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
     a.href = url
-    a.download = `${result.value?.story_bible?.title || 'script'}.${format}`
+    a.download = `${result.value?.script?.title || 'script'}.${format}`
     a.click()
     URL.revokeObjectURL(url)
     ElMessage.success(`导出 ${format.toUpperCase()} 成功`)
@@ -163,7 +173,7 @@ onMounted(async () => {
         <div v-show="activeTab === 'yaml'" class="yaml-view">
           <div class="yaml-description">
             <p>📋 以下内容为符合题目要求的 <strong>YAML 格式剧本</strong>，可复制、导出并继续编辑。</p>
-            <p>结构包含：script → chapters → scenes → elements (action/dialogue/narration)</p>
+            <p>结构包含：schema_version → script → characters / chapters → scenes → elements。</p>
           </div>
           <div class="yaml-structure-check" :class="{ valid: yamlStructureValid }">
             <el-icon v-if="yamlStructureValid"><Check /></el-icon>
@@ -184,16 +194,16 @@ onMounted(async () => {
           <template v-if="result">
             <!-- 故事设定 -->
             <div class="story-header">
-              <h2 class="script-title">{{ result.story_bible?.title }}</h2>
+              <h2 class="script-title">{{ result.script?.title }}</h2>
               <div class="script-meta">
-                <span>类型: {{ result.story_bible?.genre }}</span>
-                <span>主题: {{ result.story_bible?.theme }}</span>
+                <span>类型: {{ result.script?.genre }}</span>
+                <span>主题: {{ result.script?.theme }}</span>
               </div>
             </div>
 
             <!-- 章节内容 -->
             <div
-              v-for="chapter in result.chapters"
+              v-for="chapter in result.script?.chapters"
               :key="chapter.chapter_id"
               class="chapter-section"
             >
@@ -242,28 +252,28 @@ onMounted(async () => {
 
                 <div class="scene-summary">{{ scene.summary }}</div>
 
-                <div class="beats-list">
+                <div class="elements-list">
                   <div
-                    v-for="(beat, index) in scene.beats"
+                    v-for="(element, index) in scene.elements"
                     :key="index"
-                    class="beat-item"
-                    :class="beat.type"
+                    class="element-item"
+                    :class="element.type"
                   >
-                    <template v-if="beat.type === 'dialogue'">
-                      <span class="speaker">{{ beat.speaker }}:</span>
-                      <span class="content">{{ beat.content }}</span>
+                    <template v-if="element.type === 'dialogue'">
+                      <span class="speaker">{{ element.speaker }}:</span>
+                      <span class="content">{{ element.content }}</span>
                     </template>
-                    <template v-else-if="beat.type === 'action'">
-                      <span class="beat-tag">【动作】</span>
-                      <span class="content">{{ beat.content }}</span>
+                    <template v-else-if="element.type === 'action'">
+                      <span class="element-tag">【动作】</span>
+                      <span class="content">{{ element.content }}</span>
                     </template>
-                    <template v-else-if="beat.type === 'narration'">
-                      <span class="beat-tag">【旁白】</span>
-                      <span class="content">{{ beat.content }}</span>
+                    <template v-else-if="element.type === 'narration'">
+                      <span class="element-tag">【旁白】</span>
+                      <span class="content">{{ element.content }}</span>
                     </template>
-                    <template v-else-if="beat.type === 'transition'">
-                      <span class="beat-tag">【转场】</span>
-                      <span class="content">{{ beat.content }}</span>
+                    <template v-else-if="element.type === 'transition'">
+                      <span class="element-tag">【转场】</span>
+                      <span class="content">{{ element.content }}</span>
                     </template>
                   </div>
                 </div>
@@ -625,32 +635,32 @@ onMounted(async () => {
   font-style: italic;
 }
 
-.beats-list {
+.elements-list {
   display: flex;
   flex-direction: column;
   gap: 8px;
 }
 
-.beat-item {
+.element-item {
   font-size: 14px;
   line-height: 1.6;
   padding: 8px 12px;
   border-radius: 6px;
 }
 
-.beat-item.dialogue {
+.element-item.dialogue {
   background: rgba(99, 102, 241, 0.1);
 }
 
-.beat-item.action {
+.element-item.action {
   background: rgba(236, 72, 153, 0.1);
 }
 
-.beat-item.narration {
+.element-item.narration {
   background: rgba(16, 185, 129, 0.1);
 }
 
-.beat-item.transition {
+.element-item.transition {
   background: rgba(245, 158, 11, 0.1);
 }
 
@@ -660,22 +670,22 @@ onMounted(async () => {
   margin-right: 8px;
 }
 
-.beat-tag {
+.element-tag {
   font-size: 12px;
   font-weight: 600;
   margin-right: 8px;
   opacity: 0.7;
 }
 
-.beat-item.action .beat-tag {
+.element-item.action .element-tag {
   color: #f472b6;
 }
 
-.beat-item.narration .beat-tag {
+.element-item.narration .element-tag {
   color: #10b981;
 }
 
-.beat-item.transition .beat-tag {
+.element-item.transition .element-tag {
   color: #fbbf24;
 }
 

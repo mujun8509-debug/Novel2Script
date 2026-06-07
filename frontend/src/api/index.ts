@@ -38,7 +38,7 @@ export interface StoryBible {
   }>
 }
 
-export interface Beat {
+export interface ScriptElement {
   type: 'dialogue' | 'action' | 'narration' | 'transition'
   speaker?: string
   content: string
@@ -51,19 +51,21 @@ export interface Scene {
   time: string
   characters: string[]
   summary: string
-  beats: Beat[]
+  elements: ScriptElement[]
 }
 
 export interface Chapter {
   chapter_id: string
   title: string
+  summary?: string
   scenes: Scene[]
 }
 
 export interface ScriptResult {
   schema_version: string
-  story_bible: StoryBible
-  chapters: Chapter[]
+  script: StoryBible & {
+    chapters: Chapter[]
+  }
 }
 
 export interface ProjectInfo {
@@ -111,8 +113,10 @@ export const apiService = {
   },
 
   // 转换剧本
-  async convertProject(id: string): Promise<{ status: string; message: string }> {
-    const response = await api.post(`/projects/${id}/convert`)
+  async convertProject(id: string, chapterIds?: string[]): Promise<{ status: string; message: string }> {
+    const response = await api.post(`/projects/${id}/convert`, chapterIds?.length ? {
+      chapter_ids: chapterIds
+    } : undefined)
     return response.data
   },
 

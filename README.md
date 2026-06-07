@@ -1,166 +1,172 @@
 # Novel2Script
 
-AI 小说转结构化剧本工具 - 将小说自动转换为符合 YAML Schema 的结构化剧本。
+AI 小说转结构化剧本工具。项目将 3 个章节以上的小说文本转换为可编辑、可校验、可导出的 YAML 剧本。
 
 ## 功能特性
 
-- **智能章节识别**：自动识别小说章节，支持多种章节格式
-- **全局信息提取**：提取故事标题、类型、主题、世界观、人物、地点
-- **结构化剧本生成**：按章节生成结构化剧本 YAML
-- **Schema 校验与修复**：后端 Pydantic 模型校验，自动修复格式错误
-- **可视化预览**：YAML 编辑器 + 剧本可视化预览双视图
-- **多格式导出**：支持导出 YAML 和 Markdown 格式
+- **智能章节识别**：识别 `第一章`、`第1章`、`Chapter 1`、序章、番外等常见格式。
+- **长文本兜底分章**：未检测到章节标题时，自动按文本长度拆分为至少 3 章。
+- **结构化剧本生成**：输出 `script -> chapters -> scenes -> elements` 结构。
+- **人物与地点提取**：在 `script.characters` 和 `script.locations` 中保留全局设定。
+- **Schema 校验与统计**：后端检查章节数、场景字段和动作/对白/旁白/转场元素。
+- **可视化预览与导出**：前端支持 YAML 源码、剧本预览、复制、YAML 导出和 Markdown 导出。
 
-## 技术栈
+## 技术栈与第三方依赖
 
-- **前端**：Vue 3 + Vite + Element Plus + TypeScript
-- **后端**：Python FastAPI
-- **AI 模型**：统一 LLMProvider 接口，支持 OpenAI/Qwen/vLLM
+后端：
+
+- Python 3.9+
+- FastAPI
+- Uvicorn
+- Pydantic
+- httpx
+- PyYAML
+- python-multipart
+
+前端：
+
+- Node.js 18+
+- Vue 3
+- Vite
+- TypeScript
+- Vue Router
+- Element Plus
+- axios
+- js-yaml
+
+AI 调用：
+
+- 统一 `LLMProvider` 接口，兼容 OpenAI 协议。
+- 支持 `openai`、`qwen`、`deepseek`、`deepseekv4pro`、`vllm` 等配置。
 
 ## 项目结构
 
-```
+```text
 project1/
 ├── backend/
-│   ├── main.py              # FastAPI 入口
-│   ├── models.py            # Pydantic 数据模型
-│   ├── routers/
-│   │   └── api.py           # API 路由
-│   └── services/
-│       ├── llm_provider.py  # LLM 统一接口
-│       └── novel_service.py # 小说处理服务
+│   ├── main.py
+│   ├── models.py
+│   ├── routers/api.py
+│   ├── services/llm_provider.py
+│   ├── services/novel_service.py
+│   ├── requirements.txt
+│   └── test_chapters.py
 ├── frontend/
 │   ├── src/
-│   │   ├── App.vue
-│   │   ├── main.ts
-│   │   ├── router/
 │   │   ├── api/
-│   │   ├── views/           # 页面组件
-│   │   └── styles/
-│   └── package.json
-└── documents/
-    ├── YAML_SCHEMA.md       # Schema 设计文档
-    ├── PRD.md              # 产品需求文档
-    └── TECH_ARCH.md        # 技术架构文档
+│   │   ├── router/
+│   │   ├── styles/
+│   │   └── views/
+│   ├── package.json
+│   └── vite.config.ts
+├── documents/
+│   ├── YAML_SCHEMA.md
+│   └── sample_novel.txt
+└── examples/
+    └── sample_output.yaml
 ```
 
 ## 快速开始
 
-### 环境要求
-
-- Node.js 18+
-- Python 3.9+
-- OpenAI API Key 或其他大模型 API
-
-### 后端安装
+### 1. 配置后端环境
 
 ```bash
 cd backend
 pip install -r requirements.txt
 ```
 
-### 后端配置
-
-设置环境变量（复制 .env.example 为 .env 并修改）：
+复制 `.env.example` 为 `.env`，并填入自己的 API Key：
 
 ```bash
-# DeepSeek V4 Pro（推荐）
 LLM_PROVIDER=deepseekv4pro
-OPENAI_API_KEY=sk-a82d96ac8f254a04b3ded6f5a991fe94
+OPENAI_API_KEY=your_api_key_here
 OPENAI_API_BASE=https://api.deepseek.com/v1
 LLM_MODEL=deepseek-chat
-
-# 其他可选配置
-# LLM_PROVIDER=deepseek
-# LLM_PROVIDER=openai
-# LLM_PROVIDER=qwen
-# LLM_PROVIDER=vllm
 ```
 
-### 后端启动
+### 2. 启动后端
 
 ```bash
 cd backend
 uvicorn main:app --reload --host 0.0.0.0 --port 8000
 ```
 
-### 前端安装
+后端健康检查：`http://localhost:8000/health`
+
+### 3. 启动前端
 
 ```bash
 cd frontend
 npm install
-```
-
-### 前端启动
-
-```bash
 npm run dev
 ```
 
-访问 http://localhost:3000
+访问：`http://localhost:3000`
 
-## API 接口
+## 使用流程
 
-| 接口 | 方法 | 功能 |
-|------|------|------|
-| `/api/projects` | POST | 创建项目 |
-| `/api/projects/{id}` | GET | 获取项目状态 |
-| `/api/projects/{id}/analyze` | POST | 分析小说 |
-| `/api/projects/{id}/convert` | POST | 转换剧本 |
-| `/api/projects/{id}/result` | GET | 获取结果 |
-| `/api/projects/{id}/validate` | POST | 校验 Schema |
-| `/api/projects/{id}/export` | GET | 导出结果 |
+1. 在首页粘贴小说文本，或上传 TXT 文件。
+2. 点击「载入示例小说」可直接使用内置三章样例；完整样例文本见 `documents/sample_novel.txt`。
+3. 点击「开始解析」，系统识别章节并提取人物、地点和故事设定。
+4. 在章节页选择至少 3 章，点击「生成所选 N 章 YAML 剧本」。
+5. 在结果页查看可视化剧本或 YAML 源码。
+6. 复制 YAML，或导出 `.yaml` / `.md` 文件。
 
 ## YAML Schema
 
-详见 [YAML_SCHEMA.md](documents/YAML_SCHEMA.md)
+详见 [documents/YAML_SCHEMA.md](documents/YAML_SCHEMA.md)。
 
-## 工作流程
+核心结构：
 
-1. **上传小说**：粘贴或上传 TXT 文件
-2. **自动分析**：识别章节，提取全局信息
-3. **生成剧本**：按章节生成结构化 YAML
-4. **校验预览**：Schema 校验，可视化预览
-5. **导出使用**：导出 YAML 或 Markdown
+```yaml
+schema_version: "1.0"
+script:
+  title: "剧本标题"
+  characters: []
+  chapters:
+    - chapter_id: "chapter_001"
+      scenes:
+        - scene_id: "scene_001"
+          elements:
+            - type: "dialogue"
+              speaker: "角色"
+              content: "对白"
+```
 
-## 设计亮点
-
-1. **不是简单文本生成，而是结构化转换**
-2. **自定义 YAML Schema，专为剧本设计**
-3. **自动校验与修复，工程化质量控制**
-4. **可视化预览，YAML 编辑器双视图**
-5. **支持长文本分章处理**
+完整示例见 [examples/sample_output.yaml](examples/sample_output.yaml)。
 
 ## 与题目要求对应关系
 
 | 题目要求 | 项目实现 |
-|----------|----------|
-| 3 个章节以上小说文本 | 支持 TXT 上传并识别 3 章以上章节，自动分割不规则文本 |
-| 自动转换为结构化剧本 | 使用 AI 提取章节、场景、人物、动作、对白、旁白 |
-| YAML 格式 | 提供 YAML 预览、复制和 .yaml 导出 |
-| YAML Schema 文档 | 提供 documents/yaml-schema-design.md |
-| 可编辑剧本初稿 | YAML 文件可直接人工修改和二次创作 |
+| --- | --- |
+| 3 个章节以上小说文本 | 后端章节识别和兜底分章均保证至少 3 章；前端生成按钮要求至少选择 3 章 |
+| 自动转换为结构化剧本 | LLM 按章节生成场景、动作、对白、旁白和转场 |
+| YAML 格式 | 结果页提供 YAML 源码、复制和 `.yaml` 导出 |
+| 包含 script/chapters/characters/scenes/elements | YAML 顶层为 `script`，内部包含 `characters`、`chapters`，章节下包含 `scenes`，场景下包含 `elements` |
+| YAML Schema 设计文档 | `documents/YAML_SCHEMA.md` |
+| 可编辑剧本初稿 | YAML 文本可复制、格式化、导出并继续人工修改 |
 
-## 评分亮点
+## 原创功能与展示亮点
 
-1. **完整流程**：上传 → 识别 → 生成 → 预览 → 导出
-2. **创新性**：面向小说短剧化改编，输出可编辑 YAML 剧本
-3. **工程质量**：模块化结构、异常处理、测试样例、README 和 Schema 文档
-4. **展示友好**：可视化剧本视图 + YAML 源码视图 + 示例快速载入
-5. **稳定可靠**：YAML 校验、兜底逻辑、错误提示
+- 面向小说短剧化改编，不只是摘要生成。
+- 自定义 `elements` 叙事单元，统一表达动作、对白、旁白和转场。
+- 章节选择会真实参与后端转换，适合演示三章以上批量生成。
+- 后端内置兜底结构，LLM 返回格式异常时仍能生成可编辑初稿。
+- 结果页同时提供 YAML 源码和可视化剧本视图，便于答辩展示。
 
-## 测试流程
+## 测试建议
 
-推荐测试步骤：
+```bash
+# 后端章节识别测试
+cd backend
+python test_chapters.py
 
-1. 点击「载入示例小说」或上传 test-samples/standard-chapters.txt
-2. 确认识别到 3 个以上章节
-3. 查看解析摘要面板，确认满足要求提示
-4. 点击「生成所选 N 章 YAML 剧本」
-5. 查看 YAML 源码视图，确认结构完整
-6. 测试复制 YAML 和导出 .yaml 文件
-7. 查看可视化剧本视图，确认动作/对白/旁白区分清晰
-8. 测试 Schema 校验功能
+# 前端构建检查
+cd frontend
+npm run build
+```
+
+如当前机器没有全局 Python，请使用已安装的 Python 解释器运行后端测试。
 
 ## License
 

@@ -15,6 +15,7 @@ const chapters = ref<ChapterInfo[]>([])
 const storyBible = ref<StoryBible | null>(null)
 const currentStep = ref('识别章节中...')
 const selectedChapters = ref<Set<string>>(new Set())
+const selectedStorageKey = `novel2script:selectedChapters:${projectId}`
 
 // 计算选中的章节数量
 const selectedCount = computed(() => selectedChapters.value.size)
@@ -27,15 +28,18 @@ const hasMinimumChapters = computed(() => chapters.value.length >= 3)
 
 // 全选/取消全选
 const toggleSelectAll = () => {
-  if (selectedChapters.value.size === chapters.value.length) {
+  const selectableCount = Math.min(10, chapters.value.length)
+  if (selectedChapters.value.size === selectableCount) {
     selectedChapters.value.clear()
   } else {
+    selectedChapters.value.clear()
     chapters.value.forEach(ch => {
       if (chapters.value.indexOf(ch) < 10) { // 默认最多选10章
         selectedChapters.value.add(ch.chapter_id)
       }
     })
   }
+  selectedChapters.value = new Set(selectedChapters.value)
 }
 
 // 切换单个章节选中状态
@@ -81,6 +85,7 @@ const fetchProjectDetails = async () => {
 }
 
 const handleConvert = () => {
+  sessionStorage.setItem(selectedStorageKey, JSON.stringify([...selectedChapters.value]))
   router.push(`/progress/${projectId}`)
 }
 
@@ -148,7 +153,7 @@ onMounted(async () => {
               <template v-if="selectedCount < 3">（至少需要3章）</template>
             </span>
             <button class="btn-select-all" @click="toggleSelectAll">
-              {{ selectedCount === chapters.length ? '取消全选' : '全选前10章' }}
+              {{ selectedCount === Math.min(10, chapters.length) ? '取消全选' : '全选前10章' }}
             </button>
           </div>
 

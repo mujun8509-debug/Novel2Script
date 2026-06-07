@@ -239,8 +239,8 @@ def convert_chapter_prompt(story_bible: Dict, chapter: Dict) -> str:
 要求：
 1. 保留原章节的主要剧情。
 2. 将小说叙述拆分为若干场景 scenes。
-3. 每个场景包含地点、时间、出场人物、剧情摘要和 beats。
-4. beats 的 type 只能是 dialogue、action、narration、transition。
+3. 每个场景包含地点、时间、出场人物、剧情摘要和 elements。
+4. elements 的 type 只能是 dialogue、action、narration、transition。
 5. dialogue 必须包含 speaker。
 6. action 和 narration 不需要 speaker。
 7. 不要输出 Markdown，不要解释，只输出 YAML。
@@ -264,7 +264,7 @@ scenes:
     characters:
       - ""
     summary: ""
-    beats:
+    elements:
       - type: "action"
         content: ""
       - type: "dialogue"
@@ -326,25 +326,29 @@ def validate_script_yaml(data: Dict) -> tuple:
     # 检查顶层字段
     if "schema_version" not in data:
         errors.append("缺少 schema_version 字段")
-    if "story_bible" not in data:
-        errors.append("缺少 story_bible 字段")
-    if "chapters" not in data:
-        errors.append("缺少 chapters 字段")
+    if "script" not in data:
+        errors.append("缺少 script 字段")
 
     if errors:
         return False, errors
 
+    script = data.get("script", {}) or {}
+    if not isinstance(script, dict):
+        return False, ["script 必须是对象"]
+
+    # 检查 script
+    required_script_fields = ["title", "genre", "theme", "world_setting", "main_conflict", "characters", "locations", "chapters"]
+    for field in required_script_fields:
+        if field not in script:
+            errors.append(f"script 缺少 {field} 字段")
+
     # 检查 chapters 至少 3 个
-    chapters = data.get("chapters", [])
+    chapters = script.get("chapters", [])
+    if not isinstance(chapters, list):
+        errors.append("script.chapters 必须是数组")
+        chapters = []
     if len(chapters) < 3:
         errors.append(f"章节数不足：当前 {len(chapters)} 章，要求至少 3 章")
-
-    # 检查 story_bible
-    sb = data.get("story_bible", {})
-    required_sb_fields = ["title", "genre", "theme", "world_setting", "main_conflict", "characters", "locations"]
-    for field in required_sb_fields:
-        if field not in sb:
-            errors.append(f"story_bible 缺少 {field} 字段")
 
     # 检查 chapters
     for i, chapter in enumerate(chapters):
@@ -365,22 +369,28 @@ def validate_script_yaml(data: Dict) -> tuple:
 
             if "scene_id" not in scene:
                 errors.append(f"第 {i+1} 章第 {j+1} 场景缺少 scene_id")
-            if "beats" not in scene:
-                errors.append(f"第 {i+1} 章第 {j+1} 场景缺少 beats")
-            elif not isinstance(scene.get("beats"), list):
-                errors.append(f"第 {i+1} 章第 {j+1} 场景 beats 必须是数组")
+            for field in ["scene_title", "location", "time", "characters", "summary"]:
+                if field not in scene:
+                    errors.append(f"第 {i+1} 章第 {j+1} 场景缺少 {field}")
 
-            # 检查 beats
-            for k, beat in enumerate(scene.get("beats", []) or []):
-                if not isinstance(beat, dict):
-                    errors.append(f"第 {i+1} 章第 {j+1} 场景第 {k+1} 个 beat 格式错误")
+            if "elements" not in scene:
+                errors.append(f"第 {i+1} 章第 {j+1} 场景缺少 elements")
+            elif not isinstance(scene.get("elements"), list):
+                errors.append(f"第 {i+1} 章第 {j+1} 场景 elements 必须是数组")
+
+            # 检查 elements
+            for k, element in enumerate(scene.get("elements", []) or []):
+                if not isinstance(element, dict):
+                    errors.append(f"第 {i+1} 章第 {j+1} 场景第 {k+1} 个 element 格式错误")
                     continue
 
-                if "type" not in beat:
-                    errors.append(f"第 {i+1} 章第 {j+1} 场景第 {k+1} 个 beat 缺少 type")
-                if "content" not in beat:
-                    errors.append(f"第 {i+1} 章第 {j+1} 场景第 {k+1} 个 beat 缺少 content")
-                if beat.get("type") == "dialogue" and "speaker" not in beat:
+                if "type" not in element:
+                    errors.append(f"第 {i+1} 章第 {j+1} 场景第 {k+1} 个 element 缺少 type")
+                elif element.get("type") not in ["dialogue", "action", "narration", "transition"]:
+                    errors.append(f"第 {i+1} 章第 {j+1} 场景第 {k+1} 个 element type 不合法")
+                if "content" not in element:
+                    errors.append(f"第 {i+1} 章第 {j+1} 场景第 {k+1} 个 element 缺少 content")
+                if element.get("type") == "dialogue" and "speaker" not in element:
                     errors.append(f"第 {i+1} 章第 {j+1} 场景第 {k+1} 个 dialogue 缺少 speaker")
 
     return len(errors) == 0, errors
@@ -397,22 +407,64 @@ def collect_stats(data: Dict) -> Dict:
         "transitions": 0
     }
 
-    for chapter in data.get("chapters", []):
+    script = data.get("script", {}) or {}
+    for chapter in script.get("chapters", []):
         stats["chapters"] += 1
         for scene in chapter.get("scenes", []):
             stats["scenes"] += 1
-            for beat in scene.get("beats", []):
-                beat_type = beat.get("type", "")
-                if beat_type == "dialogue":
+            for element in scene.get("elements", []):
+                element_type = element.get("type", "")
+                if element_type == "dialogue":
                     stats["dialogues"] += 1
-                elif beat_type == "action":
+                elif element_type == "action":
                     stats["actions"] += 1
-                elif beat_type == "narration":
+                elif element_type == "narration":
                     stats["narrations"] += 1
-                elif beat_type == "transition":
+                elif element_type == "transition":
                     stats["transitions"] += 1
 
     return stats
+
+
+def normalize_chapter_schema(chapter: Dict) -> Dict:
+    """兼容旧字段并补齐前端预览所需字段。"""
+    chapter.setdefault("chapter_id", "chapter_001")
+    chapter.setdefault("title", "未命名章节")
+    chapter.setdefault("scenes", [])
+
+    for scene_index, scene in enumerate(chapter.get("scenes", []) or []):
+        if not isinstance(scene, dict):
+            continue
+        scene.setdefault("scene_id", f"scene_{scene_index + 1:03d}")
+        scene.setdefault("scene_title", "待整理场景")
+        scene.setdefault("location", "未指定")
+        scene.setdefault("time", "未指定")
+        scene.setdefault("characters", [])
+        scene.setdefault("summary", "内容待整理")
+
+        if "elements" not in scene and "beats" in scene:
+            scene["elements"] = scene.pop("beats")
+        scene.setdefault("elements", [])
+
+    return chapter
+
+
+def build_script_result(story_bible: Dict, chapters: List[Dict]) -> Dict:
+    """构建最终 YAML 顶层结构。"""
+    story_bible = story_bible or {}
+    return {
+        "schema_version": "1.0",
+        "script": {
+            "title": story_bible.get("title") or "未命名剧本",
+            "genre": story_bible.get("genre") or "未指定",
+            "theme": story_bible.get("theme") or "未指定",
+            "world_setting": story_bible.get("world_setting") or "未指定",
+            "main_conflict": story_bible.get("main_conflict") or "待补充",
+            "characters": story_bible.get("characters") or [],
+            "locations": story_bible.get("locations") or [],
+            "chapters": chapters
+        }
+    }
 
 
 class NovelService:
@@ -528,28 +580,34 @@ class NovelService:
         project["status"] = "analyzed"
         return project
 
-    async def convert(self, project: Dict) -> Dict:
+    async def convert(self, project: Dict, selected_chapter_ids: Optional[List[str]] = None) -> Dict:
         """转换小说为剧本"""
         project["status"] = "converting"
         chapters = project["chapters"]
         story_bible = project.get("story_bible", {})
 
+        if selected_chapter_ids:
+            selected = set(selected_chapter_ids)
+            chapters = [ch for ch in chapters if ch.get("chapter_id") in selected]
+            if len(chapters) < 3:
+                raise ValueError(f"所选章节数不足 3 章，当前选择 {len(chapters)} 章。")
+
         script_chapters = []
         total = len(chapters)
         conversion_errors = []
+        system_prompt = "你是一个专业的影视剧本改编助手，擅长将小说改编为结构化剧本 YAML。"
 
         for i, chapter in enumerate(chapters):
             print(f"[Convert] 正在转换第 {i+1}/{total} 章: {chapter.get('title', '未命名')}")
 
             try:
                 prompt = convert_chapter_prompt(story_bible, chapter)
-                system_prompt = "你是一个专业的影视剧本改编助手，擅长将小说改编为结构化剧本 YAML。"
 
                 response = await self.llm_provider.generate(prompt, system_prompt)
                 chapter_data = parse_yaml_response(response)
 
                 if chapter_data and isinstance(chapter_data, dict):
-                    script_chapters.append(chapter_data)
+                    script_chapters.append(normalize_chapter_schema(chapter_data))
                     print(f"[Convert] 第 {i+1} 章转换成功")
                 else:
                     # 兜底：创建默认章节结构
@@ -574,7 +632,7 @@ class NovelService:
                     "time": "未指定",
                     "characters": [],
                     "summary": "内容待整理",
-                    "beats": [{
+                    "elements": [{
                         "type": "narration",
                         "content": "原始生成内容已丢失，请重新生成。"
                     }]
@@ -582,36 +640,35 @@ class NovelService:
             })
 
         # 构建最终结果
-        result = {
-            "schema_version": "1.0",
-            "story_bible": story_bible,
-            "chapters": script_chapters
-        }
+        result = build_script_result(story_bible, script_chapters)
 
         # 校验
         valid, errors = validate_script_yaml(result)
         if not valid:
             print(f"[Convert] YAML 校验失败: {errors}")
             # 尝试修复
-            schema_desc = "需要包含 schema_version, story_bible, chapters 字段，chapters 至少 3 个章节"
+            schema_desc = "需要包含 schema_version, script 字段；script 内包含 characters 和 chapters，chapters 至少 3 个章节；场景内使用 elements 字段。"
             repair_prompt = repair_yaml_prompt(schema_desc, "\n".join(errors), yaml.dump(result))
             try:
                 repair_response = await self.llm_provider.generate(repair_prompt, system_prompt)
                 fixed_result = parse_yaml_response(repair_response)
                 if fixed_result and isinstance(fixed_result, dict):
                     result = fixed_result
+                    for chapter in result.get("script", {}).get("chapters", []) or []:
+                        normalize_chapter_schema(chapter)
                     valid, errors = validate_script_yaml(result)
                     print(f"[Convert] YAML 修复{'成功' if valid else '仍失败'}")
             except Exception as e:
                 print(f"[Convert] YAML 修复异常: {e}")
 
         # 最终兜底：确保至少 3 个章节
-        if len(result.get("chapters", [])) < 3:
+        result.setdefault("script", {}).setdefault("chapters", [])
+        if len(result["script"].get("chapters", [])) < 3:
             print(f"[Convert] 最终兜底：确保至少 3 个章节")
-            while len(result.get("chapters", [])) < 3:
-                result["chapters"].append({
-                    "chapter_id": f"chapter_{len(result['chapters']) + 1:03d}",
-                    "title": f"第 {len(result['chapters']) + 1} 章",
+            while len(result["script"].get("chapters", [])) < 3:
+                result["script"]["chapters"].append({
+                    "chapter_id": f"chapter_{len(result['script']['chapters']) + 1:03d}",
+                    "title": f"第 {len(result['script']['chapters']) + 1} 章",
                     "scenes": [{
                         "scene_id": "scene_001",
                         "scene_title": "系统生成章节",
@@ -619,7 +676,7 @@ class NovelService:
                         "time": "未指定",
                         "characters": [],
                         "summary": "系统自动生成以满足最小章节要求",
-                        "beats": [{
+                        "elements": [{
                             "type": "narration",
                             "content": "本章节为系统自动生成以满足至少 3 章的要求，请手动编辑或重新生成。"
                         }]
@@ -637,24 +694,27 @@ class NovelService:
         }
         project["status"] = "completed"
 
-        return result
+        return project
 
 
 def create_fallback_chapter(chapter: Dict, story_bible: Dict) -> Dict:
     """创建兜底章节结构"""
+    characters = story_bible.get("characters", [])[:3] if story_bible else []
+    character_names = [
+        char.get("name", str(char)) if isinstance(char, dict) else str(char)
+        for char in characters
+    ]
     return {
         "chapter_id": chapter.get("chapter_id", "chapter_001"),
         "title": chapter.get("title", "未命名章节"),
-        "summary": "AI 返回内容格式异常，已生成基础结构。",
-        "characters": story_bible.get("characters", [])[:3] if story_bible else [],
         "scenes": [{
             "scene_id": "scene_001",
             "scene_title": "待整理场景",
             "location": "未指定",
             "time": "未指定",
-            "atmosphere": "未指定",
-            "purpose": "保留原始生成内容，便于后续编辑。",
-            "beats": [{
+            "characters": character_names,
+            "summary": "AI 返回内容格式异常，已生成基础结构。",
+            "elements": [{
                 "type": "narration",
                 "content": chapter.get("content", "内容待整理")[:500] + "..."
             }]

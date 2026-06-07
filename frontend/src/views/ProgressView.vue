@@ -7,45 +7,41 @@ import { apiService } from '@/api'
 const router = useRouter()
 const route = useRoute()
 const projectId = route.params.id as string
+const selectedStorageKey = `novel2script:selectedChapters:${projectId}`
 
 const currentStep = ref('准备中...')
-const steps = [
-  { name: '提取人物设定', key: 'story_bible', status: 'pending' },
-  { name: '生成第 1 章剧本', key: 'chapter_1', status: 'pending' },
-  { name: '生成第 2 章剧本', key: 'chapter_2', status: 'pending' },
-  { name: '生成第 3 章剧本', key: 'chapter_3', status: 'pending' },
+const selectedChapterIds = ref<string[]>([])
+
+const buildSteps = (chapterCount: number) => [
+  { name: '准备转换', key: 'prepare', status: 'pending' },
+  { name: `生成所选 ${chapterCount} 章剧本`, key: 'chapters', status: 'pending' },
   { name: '校验 YAML Schema', key: 'validate', status: 'pending' },
   { name: '生成完成', key: 'completed', status: 'pending' }
 ]
+
+const steps = ref(buildSteps(3))
 
 const progress = ref(0)
 const isConverting = ref(true)
 let pollInterval: number | null = null
 
 const updateSteps = (status: string) => {
-  const stepMap: Record<string, number> = {
-    'converting': 0,
-    'story_bible': 1,
-    'chapter_1': 2,
-    'chapter_2': 3,
-    'chapter_3': 4,
-    'validate': 5,
-    'completed': 6
-  }
-
-  const currentIndex = stepMap[status] || 0
-  steps.forEach((step, index) => {
+  const currentIndex = status === 'completed' ? steps.value.length : status === 'converting' ? 1 : 0
+  steps.value.forEach((step, index) => {
     if (index < currentIndex) {
       step.status = 'completed'
     } else if (index === currentIndex) {
       step.status = 'active'
-      currentStep.value = steps[index].name
+      currentStep.value = steps.value[index].name
     } else {
       step.status = 'pending'
     }
   })
 
-  progress.value = Math.min((currentIndex / (steps.length - 1)) * 100, 100)
+  if (status === 'completed') {
+    currentStep.value = '生成完成'
+  }
+  progress.value = Math.min((currentIndex / steps.value.length) * 100, 100)
 }
 
 const checkStatus = async () => {
@@ -70,14 +66,22 @@ const checkStatus = async () => {
 
 const startConvert = async () => {
   try {
-    await apiService.convertProject(projectId)
+    await apiService.convertProject(projectId, selectedChapterIds.value)
+    await checkStatus()
   } catch (error: any) {
-    ElMessage.error(error.detail || '转换失败')
+    ElMessage.error(error.response?.data?.detail || error.detail || '转换失败')
     isConverting.value = false
   }
 }
 
 onMounted(() => {
+  try {
+    const raw = sessionStorage.getItem(selectedStorageKey)
+    selectedChapterIds.value = raw ? JSON.parse(raw) : []
+  } catch {
+    selectedChapterIds.value = []
+  }
+  steps.value = buildSteps(selectedChapterIds.value.length || 3)
   updateSteps('converting')
   startConvert()
 

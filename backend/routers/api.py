@@ -5,6 +5,7 @@ import os
 import json
 import yaml
 import logging
+from typing import Optional
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
 from datetime import datetime
@@ -18,7 +19,7 @@ logger = logging.getLogger(__name__)
 
 from models import (
     ProjectCreate, ProjectResponse, AnalyzeResponse,
-    ConvertResponse, ValidateResponse
+    ConvertResponse, ValidateResponse, ConvertRequest
 )
 from services.novel_service import NovelService
 from services.llm_provider import create_llm_provider
@@ -111,7 +112,7 @@ async def analyze_project(project_id: str):
 
 
 @router.post("/projects/{project_id}/convert", response_model=dict)
-async def convert_project(project_id: str):
+async def convert_project(project_id: str, data: Optional[ConvertRequest] = None):
     """转换小说为剧本"""
     if project_id not in projects:
         raise HTTPException(status_code=404, detail="项目不存在")
@@ -122,12 +123,17 @@ async def convert_project(project_id: str):
         raise HTTPException(status_code=400, detail="请先完成分析步骤")
 
     try:
-        project = await novel_service.convert(project)
+        selected_chapter_ids = data.chapter_ids if data and data.chapter_ids else None
+        project = await novel_service.convert(project, selected_chapter_ids)
         projects[project_id] = project
         return {
             "status": "completed",
             "message": "剧本生成完成"
         }
+    except ValueError as e:
+        project["status"] = "analyzed"
+        projects[project_id] = project
+        raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         project["status"] = "error"
         projects[project_id] = project
@@ -206,14 +212,14 @@ def generate_markdown(result: dict, title: str) -> str:
     lines = []
     lines.append(f"# {title}\n")
 
-    sb = result.get("story_bible", {})
-    lines.append(f"**类型**: {sb.get('genre', 'N/A')}")
-    lines.append(f"**主题**: {sb.get('theme', 'N/A')}")
-    lines.append(f"**世界观**: {sb.get('world_setting', 'N/A')}")
-    lines.append(f"**核心冲突**: {sb.get('main_conflict', 'N/A')}\n")
+    script = result.get("script", {})
+    lines.append(f"**类型**: {script.get('genre', 'N/A')}")
+    lines.append(f"**主题**: {script.get('theme', 'N/A')}")
+    lines.append(f"**世界观**: {script.get('world_setting', 'N/A')}")
+    lines.append(f"**核心冲突**: {script.get('main_conflict', 'N/A')}\n")
 
     lines.append("## 人物\n")
-    for char in sb.get("characters", []):
+    for char in script.get("characters", []):
         lines.append(f"- **{char.get('name', 'N/A')}** ({char.get('role', 'N/A')})")
         if char.get('personality'):
             lines.append(f"  - 性格: {char['personality']}")
@@ -221,10 +227,10 @@ def generate_markdown(result: dict, title: str) -> str:
             lines.append(f"  - 目标: {char['goal']}")
 
     lines.append("\n## 地点\n")
-    for loc in sb.get("locations", []):
+    for loc in script.get("locations", []):
         lines.append(f"- **{loc.get('name', 'N/A')}**: {loc.get('description', 'N/A')}")
 
-    for chapter in result.get("chapters", []):
+    for chapter in script.get("chapters", []):
         lines.append(f"\n---\n\n## {chapter.get('title', 'N/A')}\n")
         for scene in chapter.get("scenes", []):
             lines.append(f"### {scene.get('scene_title', 'N/A')}\n")
@@ -232,18 +238,18 @@ def generate_markdown(result: dict, title: str) -> str:
             lines.append(f"**人物**: {', '.join(scene.get('characters', []))}\n")
             lines.append(f"**摘要**: {scene.get('summary', 'N/A')}\n")
 
-            for beat in scene.get("beats", []):
-                beat_type = beat.get("type", "")
-                content = beat.get("content", "")
-                speaker = beat.get("speaker", "")
+            for element in scene.get("elements", []):
+                element_type = element.get("type", "")
+                content = element.get("content", "")
+                speaker = element.get("speaker", "")
 
-                if beat_type == "dialogue":
+                if element_type == "dialogue":
                     lines.append(f"**{speaker}**: {content}\n")
-                elif beat_type == "action":
+                elif element_type == "action":
                     lines.append(f"【动作】{content}\n")
-                elif beat_type == "narration":
+                elif element_type == "narration":
                     lines.append(f"【旁白】{content}\n")
-                elif beat_type == "transition":
+                elif element_type == "transition":
                     lines.append(f"【转场】{content}\n")
 
     return "\n".join(lines)
