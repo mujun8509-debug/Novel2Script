@@ -320,6 +320,9 @@ def validate_script_yaml(data: Dict) -> tuple:
     """校验 YAML 数据结构"""
     errors = []
 
+    if not data:
+        return False, ["数据为空"]
+
     # 检查顶层字段
     if "schema_version" not in data:
         errors.append("缺少 schema_version 字段")
@@ -331,6 +334,11 @@ def validate_script_yaml(data: Dict) -> tuple:
     if errors:
         return False, errors
 
+    # 检查 chapters 至少 3 个
+    chapters = data.get("chapters", [])
+    if len(chapters) < 3:
+        errors.append(f"章节数不足：当前 {len(chapters)} 章，要求至少 3 章")
+
     # 检查 story_bible
     sb = data.get("story_bible", {})
     required_sb_fields = ["title", "genre", "theme", "world_setting", "main_conflict", "characters", "locations"]
@@ -339,7 +347,6 @@ def validate_script_yaml(data: Dict) -> tuple:
             errors.append(f"story_bible 缺少 {field} 字段")
 
     # 检查 chapters
-    chapters = data.get("chapters", [])
     for i, chapter in enumerate(chapters):
         if "chapter_id" not in chapter:
             errors.append(f"第 {i+1} 章缺少 chapter_id")
@@ -347,16 +354,28 @@ def validate_script_yaml(data: Dict) -> tuple:
             errors.append(f"第 {i+1} 章缺少 title")
         if "scenes" not in chapter:
             errors.append(f"第 {i+1} 章缺少 scenes")
+        elif not isinstance(chapter.get("scenes"), list):
+            errors.append(f"第 {i+1} 章 scenes 必须是数组")
 
         # 检查 scenes
-        for j, scene in enumerate(chapter.get("scenes", [])):
+        for j, scene in enumerate(chapter.get("scenes", []) or []):
+            if not isinstance(scene, dict):
+                errors.append(f"第 {i+1} 章第 {j+1} 场景格式错误")
+                continue
+
             if "scene_id" not in scene:
                 errors.append(f"第 {i+1} 章第 {j+1} 场景缺少 scene_id")
             if "beats" not in scene:
                 errors.append(f"第 {i+1} 章第 {j+1} 场景缺少 beats")
+            elif not isinstance(scene.get("beats"), list):
+                errors.append(f"第 {i+1} 章第 {j+1} 场景 beats 必须是数组")
 
             # 检查 beats
-            for k, beat in enumerate(scene.get("beats", [])):
+            for k, beat in enumerate(scene.get("beats", []) or []):
+                if not isinstance(beat, dict):
+                    errors.append(f"第 {i+1} 章第 {j+1} 场景第 {k+1} 个 beat 格式错误")
+                    continue
+
                 if "type" not in beat:
                     errors.append(f"第 {i+1} 章第 {j+1} 场景第 {k+1} 个 beat 缺少 type")
                 if "content" not in beat:
@@ -517,34 +536,50 @@ class NovelService:
 
         script_chapters = []
         total = len(chapters)
+        conversion_errors = []
 
         for i, chapter in enumerate(chapters):
-            prompt = convert_chapter_prompt(story_bible, chapter)
-            system_prompt = "你是一个专业的影视剧本改编助手，擅长将小说改编为结构化剧本 YAML。"
+            print(f"[Convert] 正在转换第 {i+1}/{total} 章: {chapter.get('title', '未命名')}")
 
-            response = await self.llm_provider.generate(prompt, system_prompt)
-            chapter_data = parse_yaml_response(response)
+            try:
+                prompt = convert_chapter_prompt(story_bible, chapter)
+                system_prompt = "你是一个专业的影视剧本改编助手，擅长将小说改编为结构化剧本 YAML。"
 
-            if chapter_data:
-                script_chapters.append(chapter_data)
-            else:
-                # 创建默认章节结构
-                script_chapters.append({
-                    "chapter_id": chapter["chapter_id"],
-                    "title": chapter["title"],
-                    "scenes": [{
-                        "scene_id": "scene_001",
-                        "scene_title": "场景一",
-                        "location": "待补充",
-                        "time": "待补充",
-                        "characters": [],
-                        "summary": "内容待补充",
-                        "beats": [{
-                            "type": "narration",
-                            "content": chapter["content"][:500] + "..."
-                        }]
+                response = await self.llm_provider.generate(prompt, system_prompt)
+                chapter_data = parse_yaml_response(response)
+
+                if chapter_data and isinstance(chapter_data, dict):
+                    script_chapters.append(chapter_data)
+                    print(f"[Convert] 第 {i+1} 章转换成功")
+                else:
+                    # 兜底：创建默认章节结构
+                    print(f"[Convert] 第 {i+1} 章解析失败，使用兜底结构")
+                    conversion_errors.append(f"第 {i+1} 章解析失败")
+                    script_chapters.append(create_fallback_chapter(chapter, story_bible))
+            except Exception as e:
+                print(f"[Convert] 第 {i+1} 章转换异常: {e}")
+                conversion_errors.append(f"第 {i+1} 章异常: {str(e)}")
+                script_chapters.append(create_fallback_chapter(chapter, story_bible))
+
+        # 如果所有章节都失败，至少保证有 3 个章节
+        while len(script_chapters) < 3 and len(chapters) < 3:
+            print(f"[Convert] 补充兜底章节以满足 3 章要求")
+            script_chapters.append({
+                "chapter_id": f"chapter_{len(script_chapters) + 1:03d}",
+                "title": f"第 {len(script_chapters) + 1} 章",
+                "scenes": [{
+                    "scene_id": "scene_001",
+                    "scene_title": "待整理场景",
+                    "location": "未指定",
+                    "time": "未指定",
+                    "characters": [],
+                    "summary": "内容待整理",
+                    "beats": [{
+                        "type": "narration",
+                        "content": "原始生成内容已丢失，请重新生成。"
                     }]
-                })
+                }]
+            })
 
         # 构建最终结果
         result = {
@@ -556,21 +591,72 @@ class NovelService:
         # 校验
         valid, errors = validate_script_yaml(result)
         if not valid:
+            print(f"[Convert] YAML 校验失败: {errors}")
             # 尝试修复
-            schema_desc = "需要包含 schema_version, story_bible, chapters 字段"
+            schema_desc = "需要包含 schema_version, story_bible, chapters 字段，chapters 至少 3 个章节"
             repair_prompt = repair_yaml_prompt(schema_desc, "\n".join(errors), yaml.dump(result))
-            repair_response = await self.llm_provider.generate(repair_prompt, system_prompt)
-            fixed_result = parse_yaml_response(repair_response)
-            if fixed_result:
-                result = fixed_result
-                valid, errors = validate_script_yaml(result)
+            try:
+                repair_response = await self.llm_provider.generate(repair_prompt, system_prompt)
+                fixed_result = parse_yaml_response(repair_response)
+                if fixed_result and isinstance(fixed_result, dict):
+                    result = fixed_result
+                    valid, errors = validate_script_yaml(result)
+                    print(f"[Convert] YAML 修复{'成功' if valid else '仍失败'}")
+            except Exception as e:
+                print(f"[Convert] YAML 修复异常: {e}")
+
+        # 最终兜底：确保至少 3 个章节
+        if len(result.get("chapters", [])) < 3:
+            print(f"[Convert] 最终兜底：确保至少 3 个章节")
+            while len(result.get("chapters", [])) < 3:
+                result["chapters"].append({
+                    "chapter_id": f"chapter_{len(result['chapters']) + 1:03d}",
+                    "title": f"第 {len(result['chapters']) + 1} 章",
+                    "scenes": [{
+                        "scene_id": "scene_001",
+                        "scene_title": "系统生成章节",
+                        "location": "未指定",
+                        "time": "未指定",
+                        "characters": [],
+                        "summary": "系统自动生成以满足最小章节要求",
+                        "beats": [{
+                            "type": "narration",
+                            "content": "本章节为系统自动生成以满足至少 3 章的要求，请手动编辑或重新生成。"
+                        }]
+                    }]
+                })
+            valid = False
+            errors.append("自动补充了章节以满足 3 章最低要求")
 
         project["result"] = result
         project["validation_result"] = {
             "valid": valid,
             "errors": errors,
-            "stats": collect_stats(result)
+            "stats": collect_stats(result),
+            "conversion_errors": conversion_errors
         }
         project["status"] = "completed"
 
-        return project
+        return result
+
+
+def create_fallback_chapter(chapter: Dict, story_bible: Dict) -> Dict:
+    """创建兜底章节结构"""
+    return {
+        "chapter_id": chapter.get("chapter_id", "chapter_001"),
+        "title": chapter.get("title", "未命名章节"),
+        "summary": "AI 返回内容格式异常，已生成基础结构。",
+        "characters": story_bible.get("characters", [])[:3] if story_bible else [],
+        "scenes": [{
+            "scene_id": "scene_001",
+            "scene_title": "待整理场景",
+            "location": "未指定",
+            "time": "未指定",
+            "atmosphere": "未指定",
+            "purpose": "保留原始生成内容，便于后续编辑。",
+            "beats": [{
+                "type": "narration",
+                "content": chapter.get("content", "内容待整理")[:500] + "..."
+            }]
+        }]
+    }
