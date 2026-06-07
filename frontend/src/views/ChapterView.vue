@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { apiService, ChapterInfo, StoryBible } from '@/api'
@@ -14,6 +14,40 @@ const projectInfo = ref<any>(null)
 const chapters = ref<ChapterInfo[]>([])
 const storyBible = ref<StoryBible | null>(null)
 const currentStep = ref('识别章节中...')
+const selectedChapters = ref<Set<string>>(new Set())
+
+// 计算选中的章节数量
+const selectedCount = computed(() => selectedChapters.value.size)
+
+// 检查是否满足批量生成要求（至少3章）
+const canBatchGenerate = computed(() => selectedChapters.value.size >= 3)
+
+// 检查是否至少3章（不管是否选中）
+const hasMinimumChapters = computed(() => chapters.value.length >= 3)
+
+// 全选/取消全选
+const toggleSelectAll = () => {
+  if (selectedChapters.value.size === chapters.value.length) {
+    selectedChapters.value.clear()
+  } else {
+    chapters.value.forEach(ch => {
+      if (chapters.value.indexOf(ch) < 10) { // 默认最多选10章
+        selectedChapters.value.add(ch.chapter_id)
+      }
+    })
+  }
+}
+
+// 切换单个章节选中状态
+const toggleChapter = (chapterId: string) => {
+  if (selectedChapters.value.has(chapterId)) {
+    selectedChapters.value.delete(chapterId)
+  } else {
+    selectedChapters.value.add(chapterId)
+  }
+  // 强制更新响应式
+  selectedChapters.value = new Set(selectedChapters.value)
+}
 
 const handleAnalyze = async () => {
   analyzing.value = true
@@ -22,9 +56,14 @@ const handleAnalyze = async () => {
     const result = await apiService.analyzeProject(projectId)
     chapters.value = result.chapters || []
     storyBible.value = result.story_bible
+    // 默认选中前3章
+    selectedChapters.value.clear()
+    chapters.value.slice(0, Math.min(3, chapters.value.length)).forEach(ch => {
+      selectedChapters.value.add(ch.chapter_id)
+    })
     currentStep.value = '提取人物设定...'
     await fetchProjectDetails()
-    ElMessage.success('分析完成')
+    ElMessage.success('分析完成，已默认选中前3章')
   } catch (error: any) {
     ElMessage.error(error.detail || '分析失败')
   } finally {
@@ -55,6 +94,11 @@ onMounted(async () => {
       const result = await apiService.getAnalysis(projectId)
       chapters.value = result.chapters || []
       storyBible.value = result.story_bible
+      // 默认选中前3章
+      selectedChapters.value.clear()
+      chapters.value.slice(0, Math.min(3, chapters.value.length)).forEach(ch => {
+        selectedChapters.value.add(ch.chapter_id)
+      })
     } catch (e) {
       console.error('获取分析结果失败', e)
     }
@@ -92,21 +136,41 @@ onMounted(async () => {
           <h2 class="section-title">
             <el-icon><Document /></el-icon>
             已识别到 {{ chapters.length }} 个章节
+            <span class="chapter-requirement" :class="{ met: hasMinimumChapters }">
+              {{ hasMinimumChapters ? '✅ 满足要求' : '⚠️ 不足3章' }}
+            </span>
           </h2>
+
+          <!-- 选择提示 -->
+          <div class="selection-info">
+            <span class="selection-count">
+              已选择 <strong>{{ selectedCount }}</strong> 个章节
+              <template v-if="selectedCount < 3">（至少需要3章）</template>
+            </span>
+            <button class="btn-select-all" @click="toggleSelectAll">
+              {{ selectedCount === chapters.length ? '取消全选' : '全选前10章' }}
+            </button>
+          </div>
 
           <div class="chapter-list">
             <div
               v-for="(chapter, index) in chapters"
               :key="chapter.chapter_id"
-              class="chapter-item"
+              :class="['chapter-item', { selected: selectedChapters.has(chapter.chapter_id) }]"
+              @click="toggleChapter(chapter.chapter_id)"
             >
+              <el-checkbox
+                :model-value="selectedChapters.has(chapter.chapter_id)"
+                @click.stop
+                @change="toggleChapter(chapter.chapter_id)"
+              />
               <span class="chapter-index">{{ index + 1 }}</span>
               <span class="chapter-title">{{ chapter.title }}</span>
               <span class="chapter-words">{{ chapter.word_count }} 字</span>
             </div>
           </div>
 
-          <div v-if="chapters.length < 3" class="warning-text">
+          <div v-if="!hasMinimumChapters" class="warning-text">
             <el-icon><Warning /></el-icon>
             检测到章节数不足 3 章，请上传至少 3 个章节的小说文本
           </div>
@@ -172,14 +236,25 @@ onMounted(async () => {
 
         <!-- 操作按钮 -->
         <div class="actions">
+          <div class="action-info">
+            <span v-if="selectedCount > 0 && selectedCount < 3" class="action-warning">
+              ⚠️ 请至少选择 3 个章节
+            </span>
+            <span v-else-if="selectedCount >= 3" class="action-success">
+              ✅ 已选择 {{ selectedCount }} 个章节，满足批量生成要求
+            </span>
+          </div>
           <button
             class="btn-primary"
-            :disabled="chapters.length < 3 || analyzing"
+            :disabled="!canBatchGenerate || analyzing"
             @click="handleConvert"
           >
-            开始生成剧本
+            生成所选 {{ selectedCount }} 章 YAML 剧本
             <el-icon><ArrowRight /></el-icon>
           </button>
+          <p class="action-hint">
+            题目要求：至少 3 个章节以上小说文本转换为结构化剧本
+          </p>
         </div>
       </div>
     </template>
@@ -298,6 +373,63 @@ onMounted(async () => {
   color: var(--text-secondary);
 }
 
+.chapter-item.selected {
+  border-color: var(--primary-color);
+  background: rgba(99, 102, 241, 0.1);
+}
+
+.chapter-requirement {
+  font-size: 13px;
+  margin-left: 12px;
+  padding: 4px 10px;
+  border-radius: 12px;
+}
+
+.chapter-requirement:not(.met) {
+  background: rgba(245, 158, 11, 0.15);
+  color: #f59e0b;
+}
+
+.chapter-requirement.met {
+  background: rgba(16, 185, 129, 0.15);
+  color: #10b981;
+}
+
+.selection-info {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 16px;
+  padding: 12px 16px;
+  background: rgba(15, 15, 26, 0.4);
+  border-radius: 8px;
+}
+
+.selection-count {
+  font-size: 14px;
+  color: var(--text-secondary);
+}
+
+.selection-count strong {
+  color: var(--primary-color);
+  font-size: 16px;
+}
+
+.btn-select-all {
+  padding: 6px 14px;
+  background: rgba(99, 102, 241, 0.15);
+  border: 1px solid rgba(99, 102, 241, 0.3);
+  border-radius: 6px;
+  color: var(--primary-color);
+  font-size: 13px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.btn-select-all:hover {
+  background: rgba(99, 102, 241, 0.25);
+}
+
 .warning-text {
   display: flex;
   align-items: center;
@@ -387,8 +519,22 @@ onMounted(async () => {
 
 .actions {
   display: flex;
-  justify-content: center;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
   margin-top: 32px;
+}
+
+.action-info {
+  font-size: 14px;
+}
+
+.action-warning {
+  color: #f59e0b;
+}
+
+.action-success {
+  color: #10b981;
 }
 
 .btn-primary {
@@ -397,6 +543,12 @@ onMounted(async () => {
   gap: 8px;
   padding: 14px 48px;
   font-size: 16px;
+}
+
+.action-hint {
+  font-size: 12px;
+  color: var(--text-secondary);
+  margin-top: 8px;
 }
 
 @keyframes fadeIn {
